@@ -1,0 +1,54 @@
+name: V118 fixed-parameter qualification
+
+on:
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Run explicit/index and implicit/parameter fixtures
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V118ExplicitIndexControl.lean > v118_explicit.log 2>&1
+          EXPLICIT_RC=$?
+          lake env lean SpecimenTest/V118ImplicitParameterAcquisition.lean > v118_implicit.log 2>&1
+          IMPLICIT_RC=$?
+          set -e
+          echo "EXPLICIT_RC=$EXPLICIT_RC"
+          echo "IMPLICIT_RC=$IMPLICIT_RC"
+          echo "--- EXPLICIT ---"
+          cat v118_explicit.log
+          echo "--- IMPLICIT ---"
+          cat v118_implicit.log
+          printf '{"explicit_rc":%s,"implicit_rc":%s}\n' "$EXPLICIT_RC" "$IMPLICIT_RC" > v118_result.json
+          if [ "$EXPLICIT_RC" -eq 0 ] && [ "$IMPLICIT_RC" -ne 0 ]; then
+            echo "QUALIFIED_FIXED_PARAMETER_OBSTRUCTION"
+            exit 0
+          fi
+          if [ "$EXPLICIT_RC" -eq 0 ] && [ "$IMPLICIT_RC" -eq 0 ]; then
+            echo "NULL_ALREADY_SUPPORTED"
+            exit 11
+          fi
+          if [ "$EXPLICIT_RC" -ne 0 ] && [ "$IMPLICIT_RC" -ne 0 ]; then
+            echo "NULL_TOO_BROAD"
+            exit 12
+          fi
+          echo "NULL_DIFFERENT_FAILURE"
+          exit 13
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v118-fixed-parameter-qualification
+          path: |
+            v118_explicit.log
+            v118_implicit.log
+            v118_result.json
