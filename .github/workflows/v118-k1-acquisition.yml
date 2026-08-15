@@ -1,0 +1,60 @@
+name: V118 K1 acquisition validation
+
+on:
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  k1:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Confirm frozen K0 residual
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V118ExplicitIndexControl.lean > k0_explicit.log 2>&1
+          K0_EXPLICIT=$?
+          lake env lean SpecimenTest/V118ImplicitParameterAcquisition.lean > k0_implicit.log 2>&1
+          K0_IMPLICIT=$?
+          set -e
+          echo "K0_EXPLICIT=$K0_EXPLICIT"
+          echo "K0_IMPLICIT=$K0_IMPLICIT"
+          test "$K0_EXPLICIT" -eq 0
+          test "$K0_IMPLICIT" -ne 0
+      - name: Apply frozen generic K1
+        run: python scripts/v118_apply_k1.py
+      - name: Validate acquisition and explicit control under K1
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V118ExplicitIndexControl.lean > k1_explicit.log 2>&1
+          K1_EXPLICIT=$?
+          lake env lean SpecimenTest/V118ImplicitParameterAcquisition.lean > k1_implicit.log 2>&1
+          K1_IMPLICIT=$?
+          set -e
+          echo "K1_EXPLICIT=$K1_EXPLICIT"
+          echo "K1_IMPLICIT=$K1_IMPLICIT"
+          cat k1_explicit.log
+          cat k1_implicit.log
+          printf '{"k0_explicit":0,"k0_implicit":1,"k1_explicit":%s,"k1_implicit":%s}\n' "$K1_EXPLICIT" "$K1_IMPLICIT" > v118_k1_result.json
+          test "$K1_EXPLICIT" -eq 0
+          test "$K1_IMPLICIT" -eq 0
+      - name: Protected Specimen test suite
+        run: lake test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v118-k1-acquisition
+          path: |
+            k0_explicit.log
+            k0_implicit.log
+            k1_explicit.log
+            k1_implicit.log
+            v118_k1_result.json
+            scripts/v118_apply_k1.py
