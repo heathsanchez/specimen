@@ -14,6 +14,9 @@ jobs:
         with:
           lint: "false"
           test: "false"
+      - name: Build vendored Strata support module
+        run: |
+          lake build SpecimenTest.StrataDefs.LambdaCore
       - name: K0 direct real-Strata target
         shell: bash
         run: |
