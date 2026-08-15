@@ -13,28 +13,30 @@ new = '''  -- Phase 1: flatten function calls into fresh unknowns with equality 
   -- `funcAppExprs` or generation semantics.
   let rec collectCtorParamApps (e : Expr) : MetaM (List Expr) := do
     let mut out : List Expr := []
-    if e.isApp then
-      let (fnName, args) := e.getAppFnArgs
-      match (← getConstInfo fnName) with
-      | .ctorInfo info =>
-        for i in [:min info.numParams args.size] do
-          let xs ← collectUnmatchableProperSubterms args[i]!
-          out := out ++ xs
-      | _ => pure ()
-      for arg in args do
-        out := out ++ (← collectCtorParamApps arg)
-    else
-      match e with
-      | .lam _ ty body _ | .forallE _ ty body _ =>
-        out := out ++ (← collectCtorParamApps ty)
-        out := out ++ (← collectCtorParamApps body)
-      | .letE _ ty val body _ =>
-        out := out ++ (← collectCtorParamApps ty)
-        out := out ++ (← collectCtorParamApps val)
-        out := out ++ (← collectCtorParamApps body)
-      | .mdata _ body | .proj _ _ body =>
-        out := out ++ (← collectCtorParamApps body)
-      | _ => pure ()
+    match e with
+    | .app f a =>
+      let head := e.getAppFn
+      if head.isConst then
+        let fnName := head.constName!
+        let (_, args) := e.getAppFnArgs
+        match (← getConstInfo fnName) with
+        | .ctorInfo info =>
+          for i in [:min info.numParams args.size] do
+            let xs ← collectUnmatchableProperSubterms args[i]!
+            out := out ++ xs
+        | _ => pure ()
+      out := out ++ (← collectCtorParamApps f)
+      out := out ++ (← collectCtorParamApps a)
+    | .lam _ ty body _ | .forallE _ ty body _ =>
+      out := out ++ (← collectCtorParamApps ty)
+      out := out ++ (← collectCtorParamApps body)
+    | .letE _ ty val body _ =>
+      out := out ++ (← collectCtorParamApps ty)
+      out := out ++ (← collectCtorParamApps val)
+      out := out ++ (← collectCtorParamApps body)
+    | .mdata _ body | .proj _ _ body =>
+      out := out ++ (← collectCtorParamApps body)
+    | _ => pure ()
     pure out
   let ctorParamApps ← collectCtorParamApps conclusion
   for e in funcAppExprs do
