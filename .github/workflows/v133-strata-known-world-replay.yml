@@ -1,0 +1,88 @@
+name: V133 Strata known-world replay
+
+on:
+  push:
+    branches: ["v120-binder-aware-fixed-parameter"]
+  workflow_dispatch:
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+
+      - name: Build frozen Strata support module
+        run: |
+          lake build SpecimenTest.StrataDefs.LambdaCore
+
+      - name: K2 only reproduce direct Strata obstruction
+        shell: bash
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          lake build Specimen.DeriveConstrainedProducer
+          set +e
+          lake env lean SpecimenTest/V124DirectStrataLExpr.lean > v133_k2.log 2>&1
+          K2=$?
+          set -e
+          echo "K2=$K2"
+          cat v133_k2.log
+          if [ "$K2" -eq 0 ]; then
+            echo "INVALID_V133_K2_OBSTRUCTION_NOT_REPRODUCED"
+            exit 141
+          fi
+
+      - name: Apply exact frozen V132 K5
+        run: |
+          python scripts/v132_apply_output_dependent_input_determined.py
+          git diff -- Specimen/DeriveConstrainedProducer.lean | tee v133_k5.patch
+          lake build Specimen.DeriveConstrainedProducer
+
+      - name: K2 K5 direct Strata and 60 sample verifier
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V124DirectStrataLExpr.lean > v133_k5.log 2>&1
+          K5=$?
+          set -e
+          echo "K5=$K5"
+          cat v133_k5.log
+          printf '{"k2":1,"k5":%s' "$K5" > v133_result.json.part
+          if [ "$K5" -ne 0 ]; then
+            echo "NULL_V133_K5_DOES_NOT_RESOLVE_STRATA"
+            exit 142
+          fi
+
+      - name: Ablate K5 retaining K2
+        shell: bash
+        run: |
+          git checkout -- Specimen/DeriveConstrainedProducer.lean
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          lake build Specimen.DeriveConstrainedProducer
+          set +e
+          lake env lean SpecimenTest/V124DirectStrataLExpr.lean > v133_ablate.log 2>&1
+          ABLATE=$?
+          set -e
+          echo "ABLATE=$ABLATE"
+          cat v133_ablate.log
+          printf ',"ablate":%s}\n' "$ABLATE" >> v133_result.json.part
+          mv v133_result.json.part v133_result.json
+          if [ "$ABLATE" -eq 0 ]; then
+            echo "NULL_V133_ABLATION_NO_CAUSALITY"
+            exit 143
+          fi
+          echo "PASS_V133_STRATA_KNOWN_WORLD_REPLAY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v133-strata-known-world-replay
+          path: |
+            v133_result.json
+            v133_k5.patch
+            v133_k2.log
+            v133_k5.log
+            v133_ablate.log
