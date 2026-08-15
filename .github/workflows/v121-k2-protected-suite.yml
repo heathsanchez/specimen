@@ -1,0 +1,58 @@
+name: V121 K2 protected-suite validation
+
+on:
+  push:
+    branches: ["v120-binder-aware-fixed-parameter"]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: K0 default build and ordinary test runner
+        run: |
+          lake build
+          lake test
+      - name: Apply exact frozen V120 K2
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          git diff -- Specimen/DeriveConstrainedProducer.lean | tee v121_k2.patch
+          lake build Specimen.DeriveConstrainedProducer
+      - name: K2 default build and ordinary test runner
+        run: |
+          lake build
+          lake test
+      - name: Recheck V120 acquisition pair under K2
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V119ExplicitIndexControl.lean > v121_explicit.log 2>&1
+          EXPLICIT=$?
+          lake env lean SpecimenTest/V119ImplicitParameterAcquisition.lean > v121_implicit.log 2>&1
+          IMPLICIT=$?
+          set -e
+          echo "EXPLICIT=$EXPLICIT"
+          echo "IMPLICIT=$IMPLICIT"
+          cat v121_explicit.log
+          cat v121_implicit.log
+          printf '{"explicit":%s,"implicit":%s}\n' "$EXPLICIT" "$IMPLICIT" > v121_result.json
+          if [ "$EXPLICIT" -eq 0 ] && [ "$IMPLICIT" -eq 0 ]; then
+            echo "PASS_V121_PROTECTED_SUITE"
+            exit 0
+          fi
+          echo "HARMFUL_K2_REGRESSION_OR_ACQUISITION_DRIFT"
+          exit 31
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v121-k2-protected-suite
+          path: |
+            v121_k2.patch
+            v121_explicit.log
+            v121_implicit.log
+            v121_result.json
