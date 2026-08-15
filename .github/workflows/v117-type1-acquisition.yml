@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: ["v117-fixed-type1-acquisition-v9"]
+  pull_request:
+    branches: ["main"]
 
 jobs:
   qualify:
