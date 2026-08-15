@@ -1,0 +1,114 @@
+name: V127 preserve fixed computed parameter acquisition
+
+on:
+  push:
+    branches: ["v120-binder-aware-fixed-parameter"]
+  workflow_dispatch:
+
+jobs:
+  acquisition:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+
+      - name: Prepare frozen discriminator arms
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          src=Path('SpecimenTest/V126ComputedParameterBridgeDiscriminator.lean').read_text()
+          common=src.split('/-- ID arm. -/',1)[0]
+          Path('/tmp/V126ID.lean').write_text(common + 'derive_mutual (fun (p : V126Base) (n : Nat) => ∃ b : V126BoxId p, V126HasId b n)\n')
+          Path('/tmp/V126MAP.lean').write_text(common + 'derive_mutual (fun (p : V126Base) (n : Nat) => ∃ b : V126BoxMap (V126Lift p), V126HasMap b n)\n')
+
+          src=Path('SpecimenTest/V125UniverseLevelScheduleDiscriminator.lean').read_text()
+          common=src.split('/-- U0: structurally matched task whose fixed parameter carrier lives in `Type`. -/',1)[0]
+          Path('/tmp/V125U1.lean').write_text(common + 'derive_mutual (fun (p : V125P1) (n : Nat) => ∃ b : V125Box1 p, V125Has1 b n)\n')
+          PY
+
+      - name: Apply exact frozen V120 K2 and reproduce V126 MAP obstruction
+        shell: bash
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          lake build Specimen.DeriveConstrainedProducer
+          set +e
+          lake env lean /tmp/V126MAP.lean > v127_k2_map.log 2>&1
+          K2_MAP=$?
+          set -e
+          echo "K2_MAP=$K2_MAP"
+          cat v127_k2_map.log
+          if [ "$K2_MAP" -eq 0 ]; then
+            echo "INVALID_V126_MAP_OBSTRUCTION_NOT_REPRODUCED"
+            exit 81
+          fi
+
+      - name: Apply frozen V127 K3
+        run: |
+          python scripts/v127_apply_preserve_fixed_computed_parameter.py
+          git diff -- Specimen/DeriveConstrainedProducer.lean | tee v127_k3.patch
+          if grep -Eq 'Strata|mono|V126|V126Lift|LExprParamsT' v127_k3.patch; then
+            echo "INVALID_TARGET_SPECIFIC_K3"
+            exit 82
+          fi
+          lake build Specimen.DeriveConstrainedProducer
+          lake build
+
+      - name: Test K3 acquisition and protected controls
+        shell: bash
+        run: |
+          set +e
+          lake env lean /tmp/V126MAP.lean > v127_k3_map.log 2>&1; K3_MAP=$?
+          lake env lean /tmp/V126ID.lean > v127_k3_id.log 2>&1; K3_ID=$?
+          lake env lean /tmp/V125U1.lean > v127_k3_u1.log 2>&1; K3_U1=$?
+          lake env lean SpecimenTest/V119ExplicitIndexControl.lean > v127_k3_explicit.log 2>&1; K3_EXPLICIT=$?
+          lake env lean SpecimenTest/V119ImplicitParameterAcquisition.lean > v127_k3_implicit.log 2>&1; K3_IMPLICIT=$?
+          lake env lean SpecimenTest/V122FieldCarryingUniformParameter.lean > v127_k3_a.log 2>&1; K3_A=$?
+          lake env lean SpecimenTest/V122RecursiveUniformParameter.lean > v127_k3_b.log 2>&1; K3_B=$?
+          set -e
+          printf '{"k2_map":1,"k3_map":%s,"k3_id":%s,"k3_u1":%s,"k3_explicit":%s,"k3_implicit":%s,"k3_a":%s,"k3_b":%s' \
+            "$K3_MAP" "$K3_ID" "$K3_U1" "$K3_EXPLICIT" "$K3_IMPLICIT" "$K3_A" "$K3_B" > v127_result.json.part
+          echo "K3_MAP=$K3_MAP K3_ID=$K3_ID K3_U1=$K3_U1 K3_EXPLICIT=$K3_EXPLICIT K3_IMPLICIT=$K3_IMPLICIT K3_A=$K3_A K3_B=$K3_B"
+          cat v127_k3_map.log
+          if [ "$K3_MAP" -ne 0 ] || [ "$K3_ID" -ne 0 ] || [ "$K3_U1" -ne 0 ] || [ "$K3_EXPLICIT" -ne 0 ] || [ "$K3_IMPLICIT" -ne 0 ] || [ "$K3_A" -ne 0 ] || [ "$K3_B" -ne 0 ]; then
+            echo "NULL_OR_HARMFUL_V127_K3"
+            exit 83
+          fi
+
+      - name: Ablate K3 while retaining K2
+        shell: bash
+        run: |
+          git checkout -- Specimen/DeriveConstrainedProducer.lean
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          lake build Specimen.DeriveConstrainedProducer
+          set +e
+          lake env lean /tmp/V126MAP.lean > v127_ablate_map.log 2>&1
+          ABLATE_MAP=$?
+          set -e
+          echo "ABLATE_MAP=$ABLATE_MAP"
+          printf ',"ablate_map":%s}\n' "$ABLATE_MAP" >> v127_result.json.part
+          mv v127_result.json.part v127_result.json
+          if [ "$ABLATE_MAP" -eq 0 ]; then
+            echo "NULL_V127_ABLATION_NO_CAUSALITY"
+            exit 84
+          fi
+          echo "PASS_V127_FIXED_COMPUTED_PARAMETER_ACQUISITION"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v127-preserve-fixed-computed-parameter
+          path: |
+            v127_result.json
+            v127_k3.patch
+            v127_k2_map.log
+            v127_k3_map.log
+            v127_k3_id.log
+            v127_k3_u1.log
+            v127_k3_explicit.log
+            v127_k3_implicit.log
+            v127_k3_a.log
+            v127_k3_b.log
+            v127_ablate_map.log
