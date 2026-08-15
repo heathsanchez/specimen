@@ -24,12 +24,10 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           src=Path('SpecimenTest/V125UniverseLevelScheduleDiscriminator.lean').read_text()
-          marker='/-- U1: same shape, but the fixed parameter carrier lives in `Type 1`. -/'
-          pre,u1 = src.split(marker,1)
-          Path('/tmp/V125U0.lean').write_text(pre)
           marker0='/-- U0: structurally matched task whose fixed parameter carrier lives in `Type`. -/'
-          pre0,u0 = src.split(marker0,1)
-          Path('/tmp/V125U1.lean').write_text(pre0 + marker + u1)
+          common=src.split(marker0,1)[0]
+          Path('/tmp/V125U0.lean').write_text(common + 'derive_mutual (fun (p : V125P0) (n : Nat) => ∃ b : V125Box0 p, V125Has0 b n)\n')
+          Path('/tmp/V125U1.lean').write_text(common + 'derive_mutual (fun (p : V125P1) (n : Nat) => ∃ b : V125Box1 p, V125Has1 b n)\n')
           PY
           set +e
           lake env lean /tmp/V125U0.lean > v125_u0.log 2>&1
