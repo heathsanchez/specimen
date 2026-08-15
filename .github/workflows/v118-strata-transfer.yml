@@ -1,0 +1,56 @@
+name: V118 Strata direct transfer
+
+on:
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  transfer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: K0 ablation on direct Strata target
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V118StrataDirectTransfer.lean > strata_k0.log 2>&1
+          K0_RC=$?
+          set -e
+          echo "STRATA_K0_RC=$K0_RC"
+          cat strata_k0.log
+          test "$K0_RC" -ne 0
+      - name: Apply frozen K1b and rebuild
+        run: |
+          python scripts/v118_apply_k1.py
+          lake build Specimen
+      - name: Frozen K1b transfer on direct Strata target
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V118StrataDirectTransfer.lean > strata_k1.log 2>&1
+          K1_RC=$?
+          set -e
+          echo "STRATA_K1_RC=$K1_RC"
+          cat strata_k1.log
+          printf '{"strata_k0_rc":%s,"strata_k1_rc":%s}\n' "$K0_RC" "$K1_RC" > v118_strata_result.json
+          test "$K1_RC" -eq 0
+          grep -q 'V118_STRATA_DIRECT_SAMPLES_OK=40' strata_k1.log
+      - name: Reconfirm acquisition and explicit protected control
+        run: |
+          lake env lean SpecimenTest/V118ExplicitIndexControl.lean
+          lake env lean SpecimenTest/V118ImplicitParameterAcquisition.lean
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v118-strata-direct-transfer
+          path: |
+            strata_k0.log
+            strata_k1.log
+            v118_strata_result.json
+            scripts/v118_apply_k1.py
+            SpecimenTest/V118StrataDirectTransfer.lean
