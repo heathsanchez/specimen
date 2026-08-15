@@ -1,0 +1,75 @@
+name: V120 binder-aware fixed-parameter acquisition
+
+on:
+  push:
+    branches: ["v120-binder-aware-fixed-parameter"]
+  workflow_dispatch:
+
+jobs:
+  acquisition:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Reproduce frozen K0 discriminator
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V119ExplicitIndexControl.lean > v120_k0_explicit.log 2>&1
+          K0_EXPLICIT=$?
+          lake env lean SpecimenTest/V119ImplicitParameterAcquisition.lean > v120_k0_implicit.log 2>&1
+          K0_IMPLICIT=$?
+          set -e
+          echo "K0_EXPLICIT=$K0_EXPLICIT"
+          echo "K0_IMPLICIT=$K0_IMPLICIT"
+          if [ "$K0_EXPLICIT" -ne 0 ] || [ "$K0_IMPLICIT" -eq 0 ]; then
+            echo "INVALID_ACQUISITION_DRIFT"
+            exit 20
+          fi
+      - name: Apply frozen CARRY_IMPLICIT_FIXED_PARAMETER K2
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          git diff -- Specimen/DeriveConstrainedProducer.lean | tee v120_k2.patch
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Test K2 acquisition and matched control
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V119ExplicitIndexControl.lean > v120_k2_explicit.log 2>&1
+          K2_EXPLICIT=$?
+          lake env lean SpecimenTest/V119ImplicitParameterAcquisition.lean > v120_k2_implicit.log 2>&1
+          K2_IMPLICIT=$?
+          set -e
+          echo "K2_EXPLICIT=$K2_EXPLICIT"
+          echo "K2_IMPLICIT=$K2_IMPLICIT"
+          cat v120_k2_explicit.log
+          cat v120_k2_implicit.log
+          printf '{"k0_explicit":0,"k0_implicit":1,"k2_explicit":%s,"k2_implicit":%s}\n' "$K2_EXPLICIT" "$K2_IMPLICIT" > v120_result.json
+          if [ "$K2_EXPLICIT" -eq 0 ] && [ "$K2_IMPLICIT" -eq 0 ]; then
+            echo "PASS_V120_ACQUISITION"
+            exit 0
+          fi
+          if [ "$K2_EXPLICIT" -ne 0 ] && [ "$K2_IMPLICIT" -eq 0 ]; then
+            echo "NULL_BINDER_RULE_STILL_TOO_BROAD"
+            exit 21
+          fi
+          if [ "$K2_EXPLICIT" -eq 0 ] && [ "$K2_IMPLICIT" -ne 0 ]; then
+            echo "NULL_BINDER_RULE_INSUFFICIENT"
+            exit 22
+          fi
+          echo "NULL_K2_FAILS_BOTH"
+          exit 23
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v120-binder-aware-fixed-parameter
+          path: |
+            v120_k0_explicit.log
+            v120_k0_implicit.log
+            v120_k2_explicit.log
+            v120_k2_implicit.log
+            v120_k2.patch
+            v120_result.json
