@@ -1,0 +1,121 @@
+name: V132 output-dependent parameter admission
+
+on:
+  push:
+    branches: ["v120-binder-aware-fixed-parameter"]
+  workflow_dispatch:
+
+jobs:
+  admission:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+
+      - name: Prepare frozen fixtures
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          src=Path('SpecimenTest/V126ComputedParameterBridgeDiscriminator.lean').read_text()
+          common=src.split('/-- ID arm. -/',1)[0]
+          Path('/tmp/V132MAP.lean').write_text(common + 'derive_mutual (fun (p : V126Base) (n : Nat) => ∃ b : V126BoxMap (V126Lift p), V126HasMap b n)\n')
+          Path('/tmp/V132ID.lean').write_text(common + 'derive_mutual (fun (p : V126Base) (n : Nat) => ∃ b : V126BoxId p, V126HasId b n)\n')
+          src=Path('SpecimenTest/V125UniverseLevelScheduleDiscriminator.lean').read_text()
+          common=src.split('/-- U0: structurally matched task whose fixed parameter carrier lives in `Type`. -/',1)[0]
+          Path('/tmp/V132U1.lean').write_text(common + 'derive_mutual (fun (p : V125P1) (n : Nat) => ∃ b : V125Box1 p, V125Has1 b n)\n')
+          Path('/tmp/V132TERM.lean').write_text('''import Plausible.Arbitrary\nimport Specimen.ArbitrarySizedSuchThat\nimport Specimen.DeriveConstrainedProducer\n\ninductive V132Square : Nat → Nat → Prop where\n| sq : forall x, V132Square x (x * x)\n\nderive_generator (fun n => ∃ (m : Nat), V132Square m n)\n''')
+          PY
+
+      - name: Apply exact frozen V120 K2 and reproduce MAP obstruction
+        shell: bash
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          lake build Specimen.DeriveConstrainedProducer
+          set +e
+          lake env lean /tmp/V132MAP.lean > v132_k2_map.log 2>&1
+          K2_MAP=$?
+          set -e
+          echo "K2_MAP=$K2_MAP"
+          cat v132_k2_map.log
+          if [ "$K2_MAP" -eq 0 ]; then
+            echo "INVALID_V132_MAP_OBSTRUCTION_NOT_REPRODUCED"
+            exit 131
+          fi
+
+      - name: Apply frozen V132 K5
+        run: |
+          python scripts/v132_apply_output_dependent_input_determined.py
+          git diff -- Specimen/DeriveConstrainedProducer.lean | tee v132_k5.patch
+          if grep -Eq 'Strata|mono|V126|V126Lift|LExprParamsT' v132_k5.patch; then
+            echo "INVALID_TARGET_SPECIFIC_K5"
+            exit 132
+          fi
+          lake build Specimen.DeriveConstrainedProducer
+
+      - name: Test acquisition and frozen controls
+        shell: bash
+        run: |
+          set +e
+          lake env lean /tmp/V132MAP.lean > v132_k5_map.log 2>&1; MAP=$?
+          lake env lean /tmp/V132ID.lean > v132_k5_id.log 2>&1; ID=$?
+          lake env lean /tmp/V132U1.lean > v132_k5_u1.log 2>&1; U1=$?
+          lake env lean /tmp/V132TERM.lean > v132_k5_term.log 2>&1; TERM=$?
+          lake env lean SpecimenTest/V119ExplicitIndexControl.lean > v132_k5_explicit.log 2>&1; EXPLICIT=$?
+          lake env lean SpecimenTest/V119ImplicitParameterAcquisition.lean > v132_k5_implicit.log 2>&1; IMPLICIT=$?
+          lake env lean SpecimenTest/V122FieldCarryingUniformParameter.lean > v132_k5_a.log 2>&1; A=$?
+          lake env lean SpecimenTest/V122RecursiveUniformParameter.lean > v132_k5_b.log 2>&1; B=$?
+          set -e
+          echo "MAP=$MAP ID=$ID U1=$U1 TERM=$TERM EXPLICIT=$EXPLICIT IMPLICIT=$IMPLICIT A=$A B=$B"
+          cat v132_k5_map.log
+          printf '{"map":%s,"id":%s,"u1":%s,"term":%s,"explicit":%s,"implicit":%s,"a":%s,"b":%s' "$MAP" "$ID" "$U1" "$TERM" "$EXPLICIT" "$IMPLICIT" "$A" "$B" > v132_result.json.part
+          if [ "$MAP" -ne 0 ] || [ "$ID" -ne 0 ] || [ "$U1" -ne 0 ] || [ "$TERM" -ne 0 ] || [ "$EXPLICIT" -ne 0 ] || [ "$IMPLICIT" -ne 0 ] || [ "$A" -ne 0 ] || [ "$B" -ne 0 ]; then
+            echo "NULL_OR_HARMFUL_V132_K5"
+            exit 133
+          fi
+
+      - name: Full protected build and test under K2 K5
+        run: |
+          lake build
+          lake test
+
+      - name: Causal ablation of K5 retaining K2
+        shell: bash
+        run: |
+          git checkout -- Specimen/DeriveConstrainedProducer.lean
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          lake build Specimen.DeriveConstrainedProducer
+          set +e
+          lake env lean /tmp/V132MAP.lean > v132_ablate_map.log 2>&1
+          ABLATE=$?
+          set -e
+          echo "ABLATE=$ABLATE"
+          printf ',"ablate":%s}\n' "$ABLATE" >> v132_result.json.part
+          mv v132_result.json.part v132_result.json
+          if [ "$ABLATE" -eq 0 ]; then
+            echo "NULL_V132_ABLATION_NO_CAUSALITY"
+            exit 134
+          fi
+          echo "PASS_V132_OUTPUT_DEPENDENT_PARAMETER_ADMISSION"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v132-output-dependent-parameter-admission
+          path: |
+            v132_result.json
+            v132_result.json.part
+            v132_k5.patch
+            v132_k2_map.log
+            v132_k5_map.log
+            v132_k5_id.log
+            v132_k5_u1.log
+            v132_k5_term.log
+            v132_k5_explicit.log
+            v132_k5_implicit.log
+            v132_k5_a.log
+            v132_k5_b.log
+            v132_ablate_map.log
