@@ -1,0 +1,102 @@
+name: V122 source-distinct parameter stress
+
+on:
+  push:
+    branches: ["v120-binder-aware-fixed-parameter"]
+  workflow_dispatch:
+
+jobs:
+  stress:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Run K0 stress arms
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V122FieldCarryingUniformParameter.lean > v122_k0_a.log 2>&1
+          K0_A=$?
+          lake env lean SpecimenTest/V122RecursiveUniformParameter.lean > v122_k0_b.log 2>&1
+          K0_B=$?
+          set -e
+          echo "K0_A=$K0_A"
+          echo "K0_B=$K0_B"
+          printf '{"k0_a":%s,"k0_b":%s' "$K0_A" "$K0_B" > v122_result.json.part
+      - name: Apply exact frozen V120 K2
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          git diff -- Specimen/DeriveConstrainedProducer.lean | tee v122_k2.patch
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Run K2 stress arms and protected pair
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V122FieldCarryingUniformParameter.lean > v122_k2_a.log 2>&1
+          K2_A=$?
+          lake env lean SpecimenTest/V122RecursiveUniformParameter.lean > v122_k2_b.log 2>&1
+          K2_B=$?
+          lake env lean SpecimenTest/V119ExplicitIndexControl.lean > v122_k2_explicit.log 2>&1
+          K2_EXPLICIT=$?
+          lake env lean SpecimenTest/V119ImplicitParameterAcquisition.lean > v122_k2_implicit.log 2>&1
+          K2_IMPLICIT=$?
+          set -e
+          echo "K2_A=$K2_A"
+          echo "K2_B=$K2_B"
+          echo "K2_EXPLICIT=$K2_EXPLICIT"
+          echo "K2_IMPLICIT=$K2_IMPLICIT"
+          cat v122_k2_a.log
+          cat v122_k2_b.log
+          printf ',"k2_a":%s,"k2_b":%s,"k2_explicit":%s,"k2_implicit":%s' "$K2_A" "$K2_B" "$K2_EXPLICIT" "$K2_IMPLICIT" >> v122_result.json.part
+      - name: Ablate K2 and rerun admitted arms
+        shell: bash
+        run: |
+          git checkout -- Specimen/DeriveConstrainedProducer.lean
+          lake build Specimen.DeriveConstrainedProducer
+          set +e
+          lake env lean SpecimenTest/V122FieldCarryingUniformParameter.lean > v122_ablate_a.log 2>&1
+          ABLATE_A=$?
+          lake env lean SpecimenTest/V122RecursiveUniformParameter.lean > v122_ablate_b.log 2>&1
+          ABLATE_B=$?
+          set -e
+          echo "ABLATE_A=$ABLATE_A"
+          echo "ABLATE_B=$ABLATE_B"
+          printf ',"ablate_a":%s,"ablate_b":%s}\n' "$ABLATE_A" "$ABLATE_B" >> v122_result.json.part
+          mv v122_result.json.part v122_result.json
+
+          python - <<'PY'
+          import json, sys
+          r=json.load(open('v122_result.json'))
+          k0fails=[arm for arm in ('a','b') if r[f'k0_{arm}'] != 0]
+          if not k0fails:
+              print('NULL_ALL_ARMS_ALREADY_CONSTRUCTIBLE')
+              sys.exit(41)
+          if any(r[f'k2_{arm}'] != 0 for arm in k0fails):
+              print('NULL_K2_NO_SOURCE_DISTINCT_GENERALIZATION')
+              sys.exit(42)
+          if any(r[f'ablate_{arm}'] == 0 for arm in k0fails):
+              print('NULL_ABLATION_NO_CAUSALITY')
+              sys.exit(43)
+          if r['k2_explicit'] != 0 or r['k2_implicit'] != 0:
+              print('HARMFUL_PROTECTED_PAIR_REGRESSION')
+              sys.exit(44)
+          print('PASS_V122_SOURCE_DISTINCT_STRESS')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v122-source-distinct-parameter-stress
+          path: |
+            v122_result.json
+            v122_k2.patch
+            v122_k0_a.log
+            v122_k0_b.log
+            v122_k2_a.log
+            v122_k2_b.log
+            v122_k2_explicit.log
+            v122_k2_implicit.log
+            v122_ablate_a.log
+            v122_ablate_b.log
