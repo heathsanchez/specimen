@@ -1,0 +1,62 @@
+name: V125 universe-level schedule discriminator
+
+on:
+  push:
+    branches: ["v120-binder-aware-fixed-parameter"]
+  workflow_dispatch:
+
+jobs:
+  discriminator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact frozen V120 K2
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Split matched U0/U1 arms
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          src=Path('SpecimenTest/V125UniverseLevelScheduleDiscriminator.lean').read_text()
+          marker='/-- U1: same shape, but the fixed parameter carrier lives in `Type 1`. -/'
+          pre,u1 = src.split(marker,1)
+          Path('/tmp/V125U0.lean').write_text(pre)
+          marker0='/-- U0: structurally matched task whose fixed parameter carrier lives in `Type`. -/'
+          pre0,u0 = src.split(marker0,1)
+          Path('/tmp/V125U1.lean').write_text(pre0 + marker + u1)
+          PY
+          set +e
+          lake env lean /tmp/V125U0.lean > v125_u0.log 2>&1
+          U0=$?
+          lake env lean /tmp/V125U1.lean > v125_u1.log 2>&1
+          U1=$?
+          set -e
+          echo "U0=$U0"
+          echo "U1=$U1"
+          cat v125_u0.log
+          cat v125_u1.log
+          printf '{"u0":%s,"u1":%s}\n' "$U0" "$U1" > v125_result.json
+          if [ "$U0" -eq 0 ] && [ "$U1" -ne 0 ] && grep -Eq 'Type 1|sort `Type 1`|Type 1.*Type|Type.*Type 1' v125_u1.log; then
+            echo "PASS_V125_UNIVERSE_DISCRIMINATOR"
+            exit 0
+          fi
+          if [ "$U0" -eq 0 ] && [ "$U1" -eq 0 ]; then
+            echo "NULL_UNIVERSE_NOT_SUFFICIENT"
+            exit 61
+          fi
+          echo "INVALID_OR_DIFFERENT_V125_DISCRIMINATOR"
+          exit 62
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v125-universe-level-schedule-discriminator
+          path: |
+            v125_u0.log
+            v125_u1.log
+            v125_result.json
