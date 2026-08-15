@@ -1,0 +1,67 @@
+name: V119 carry-fixed-parameter acquisition
+
+on:
+  push:
+    branches: ["v119-carry-fixed-parameter-k1"]
+  workflow_dispatch:
+
+jobs:
+  acquisition:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Reproduce frozen K0 discriminator
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V119ExplicitIndexControl.lean > v119_k0_explicit.log 2>&1
+          K0_EXPLICIT=$?
+          lake env lean SpecimenTest/V119ImplicitParameterAcquisition.lean > v119_k0_implicit.log 2>&1
+          K0_IMPLICIT=$?
+          set -e
+          echo "K0_EXPLICIT=$K0_EXPLICIT"
+          echo "K0_IMPLICIT=$K0_IMPLICIT"
+          if [ "$K0_EXPLICIT" -ne 0 ] || [ "$K0_IMPLICIT" -eq 0 ]; then
+            echo "NULL_ACQUISITION_NOT_REPRODUCED"
+            exit 20
+          fi
+      - name: Apply frozen CARRY_FIXED_PARAMETER K1
+        run: |
+          python scripts/v119_apply_carry_fixed_parameter.py
+          git diff -- Specimen/DeriveConstrainedProducer.lean | tee v119_k1.patch
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Test K1 acquisition and protected matched control
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V119ExplicitIndexControl.lean > v119_k1_explicit.log 2>&1
+          K1_EXPLICIT=$?
+          lake env lean SpecimenTest/V119ImplicitParameterAcquisition.lean > v119_k1_implicit.log 2>&1
+          K1_IMPLICIT=$?
+          set -e
+          echo "K1_EXPLICIT=$K1_EXPLICIT"
+          echo "K1_IMPLICIT=$K1_IMPLICIT"
+          cat v119_k1_explicit.log
+          cat v119_k1_implicit.log
+          printf '{"k0_explicit":0,"k0_implicit":1,"k1_explicit":%s,"k1_implicit":%s}\n' "$K1_EXPLICIT" "$K1_IMPLICIT" > v119_acquisition_result.json
+          if [ "$K1_EXPLICIT" -eq 0 ] && [ "$K1_IMPLICIT" -eq 0 ]; then
+            echo "PASS_V119_ACQUISITION"
+            exit 0
+          fi
+          echo "NULL_K1_DOES_NOT_REPAIR_OR_REGRESSES"
+          exit 21
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v119-carry-fixed-parameter-acquisition
+          path: |
+            v119_k0_explicit.log
+            v119_k0_implicit.log
+            v119_k1_explicit.log
+            v119_k1_implicit.log
+            v119_k1.patch
+            v119_acquisition_result.json
