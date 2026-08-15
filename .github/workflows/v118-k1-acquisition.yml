@@ -28,7 +28,9 @@ jobs:
           test "$K0_EXPLICIT" -eq 0
           test "$K0_IMPLICIT" -ne 0
       - name: Apply frozen generic K1
-        run: python scripts/v118_apply_k1.py
+        run: |
+          python scripts/v118_apply_k1.py
+          lake build Specimen
       - name: Validate acquisition and explicit control under K1
         shell: bash
         run: |
