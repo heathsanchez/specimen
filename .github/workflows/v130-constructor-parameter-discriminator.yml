@@ -1,0 +1,68 @@
+name: V130 constructor parameter discriminator
+
+on:
+  push:
+    branches: ["v120-binder-aware-fixed-parameter"]
+  workflow_dispatch:
+
+jobs:
+  discriminate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+
+      - name: Apply exact K2 and diagnostic-only V130 instrumentation
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v130_instrument_constructor_parameter_roles.py
+          lake build Specimen.DeriveConstrainedProducer
+
+      - name: Prepare isolated acquisition and protected term fixtures
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          src=Path('SpecimenTest/V126ComputedParameterBridgeDiscriminator.lean').read_text()
+          common=src.split('/-- ID arm. -/',1)[0]
+          Path('/tmp/V130MAP.lean').write_text(common + 'derive_mutual (fun (p : V126Base) (n : Nat) => ∃ b : V126BoxMap (V126Lift p), V126HasMap b n)\n')
+          Path('/tmp/V130TERM.lean').write_text('''import Plausible.Arbitrary\nimport Specimen.ArbitrarySizedSuchThat\nimport Specimen.DeriveConstrainedProducer\n\ninductive V130Square : Nat → Nat → Prop where\n| sq : forall x, V130Square x (x * x)\n\nderive_generator (fun n => ∃ (m : Nat), V130Square m n)\n''')
+          PY
+
+      - name: Run role classifier
+        shell: bash
+        run: |
+          set +e
+          lake env lean /tmp/V130MAP.lean > v130_map.log 2>&1
+          MAP=$?
+          lake env lean /tmp/V130TERM.lean > v130_term.log 2>&1
+          TERM=$?
+          set -e
+          echo "MAP=$MAP TERM=$TERM"
+          cat v130_map.log
+          cat v130_term.log
+          python - <<'PY'
+          from pathlib import Path
+          m=Path('v130_map.log').read_text()
+          t=Path('v130_term.log').read_text()
+          g1=('V130Lift' in m and 'ctor_fixed_parameter=true' in m)
+          # The ordinary multiplication candidate must be observed but not classified as ctor param.
+          g2=('ctor_fixed_parameter=false' in t)
+          print('G1_MAP_CTOR_PARAM=',g1)
+          print('G2_TERM_NOT_CTOR_PARAM=',g2)
+          Path('v130_result.json').write_text('{"g1":%s,"g2":%s}\n' % (str(g1).lower(),str(g2).lower()))
+          if not (g1 and g2):
+              raise SystemExit(111)
+          print('PASS_V130_CONSTRUCTOR_PARAMETER_DISCRIMINATOR')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v130-constructor-parameter-discriminator
+          path: |
+            v130_map.log
+            v130_term.log
+            v130_result.json
