@@ -14,15 +14,12 @@ new = '''  -- Phase 1: flatten function calls into fresh unknowns with equality 
   let rec collectCtorParamApps (e : Expr) : MetaM (List Expr) := do
     let mut out : List Expr := []
     if e.isApp then
-      let (fn, args) := e.getAppFnArgs
-      match fn with
-      | .const name _ =>
-        match (← getConstInfo name) with
-        | .ctorInfo info =>
-          for i in [:min info.numParams args.size] do
-            let xs ← collectUnmatchableProperSubterms args[i]!
-            out := out ++ xs
-        | _ => pure ()
+      let (fnName, args) := e.getAppFnArgs
+      match (← getConstInfo fnName) with
+      | .ctorInfo info =>
+        for i in [:min info.numParams args.size] do
+          let xs ← collectUnmatchableProperSubterms args[i]!
+          out := out ++ xs
       | _ => pure ()
       for arg in args do
         out := out ++ (← collectCtorParamApps arg)
