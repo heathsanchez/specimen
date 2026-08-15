@@ -21,6 +21,7 @@ jobs:
           lake env lean SpecimenTest/V118StrataDirectTransfer.lean > strata_k0.log 2>&1
           K0_RC=$?
           set -e
+          echo "$K0_RC" > strata_k0_rc.txt
           echo "STRATA_K0_RC=$K0_RC"
           cat strata_k0.log
           test "$K0_RC" -ne 0
@@ -31,6 +32,7 @@ jobs:
       - name: Frozen K1b transfer on direct Strata target
         shell: bash
         run: |
+          K0_RC=$(cat strata_k0_rc.txt)
           set +e
           lake env lean SpecimenTest/V118StrataDirectTransfer.lean > strata_k1.log 2>&1
           K1_RC=$?
@@ -51,6 +53,7 @@ jobs:
           path: |
             strata_k0.log
             strata_k1.log
+            strata_k0_rc.txt
             v118_strata_result.json
             scripts/v118_apply_k1.py
             SpecimenTest/V118StrataDirectTransfer.lean
