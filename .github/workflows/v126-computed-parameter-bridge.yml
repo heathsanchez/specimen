@@ -1,0 +1,60 @@
+name: V126 computed-parameter bridge discriminator
+
+on:
+  push:
+    branches: ["v120-binder-aware-fixed-parameter"]
+  workflow_dispatch:
+
+jobs:
+  discriminator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact frozen V120 K2
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Run matched ID/MAP arms
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          src=Path('SpecimenTest/V126ComputedParameterBridgeDiscriminator.lean').read_text()
+          marker='/-- ID arm. -/'
+          common=src.split(marker,1)[0]
+          Path('/tmp/V126ID.lean').write_text(common + 'derive_mutual (fun (p : V126Base) (n : Nat) => ∃ b : V126BoxId p, V126HasId b n)\n')
+          Path('/tmp/V126MAP.lean').write_text(common + 'derive_mutual (fun (p : V126Base) (n : Nat) => ∃ b : V126BoxMap (V126Lift p), V126HasMap b n)\n')
+          PY
+          set +e
+          lake env lean /tmp/V126ID.lean > v126_id.log 2>&1
+          ID=$?
+          lake env lean /tmp/V126MAP.lean > v126_map.log 2>&1
+          MAP=$?
+          set -e
+          echo "ID=$ID"
+          echo "MAP=$MAP"
+          cat v126_id.log
+          cat v126_map.log
+          printf '{"id":%s,"map":%s}\n' "$ID" "$MAP" > v126_result.json
+          if [ "$ID" -eq 0 ] && [ "$MAP" -ne 0 ] && grep -Eq 'V126Wrapped|V126Lift|Type 1|sort `Type 1`|equality|=' v126_map.log; then
+            echo "PASS_V126_COMPUTED_PARAMETER_BRIDGE"
+            exit 0
+          fi
+          if [ "$ID" -eq 0 ] && [ "$MAP" -eq 0 ]; then
+            echo "NULL_COMPUTED_BRIDGE_NOT_SUFFICIENT"
+            exit 71
+          fi
+          echo "INVALID_OR_DIFFERENT_V126_DISCRIMINATOR"
+          exit 72
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v126-computed-parameter-bridge
+          path: |
+            v126_id.log
+            v126_map.log
+            v126_result.json
