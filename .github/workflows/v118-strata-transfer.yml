@@ -14,6 +14,8 @@ jobs:
         with:
           lint: "false"
           test: "false"
+      - name: Build held-out dependency library under K0
+        run: lake build SpecimenTest
       - name: K0 ablation on direct Strata target
         shell: bash
         run: |
@@ -28,7 +30,7 @@ jobs:
       - name: Apply frozen K1b and rebuild
         run: |
           python scripts/v118_apply_k1.py
-          lake build Specimen
+          lake build Specimen SpecimenTest
       - name: Frozen K1b transfer on direct Strata target
         shell: bash
         run: |
