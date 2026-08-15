@@ -39,7 +39,7 @@ new = '''def linearizeAndFlatten
   let fixedInputFVars := List.eraseDups inputPositionFVars
   let funcAppExprs := candidateFuncAppExprs.filter (fun e =>
     let deps := List.eraseDups (collectFVarIds e)
-    !(deps.all (· ∈ fixedInputFVars)))
+    !(deps.all (fun id => fixedInputFVars.contains id)))
 '''
 
 if old not in text:
