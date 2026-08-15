@@ -2,21 +2,25 @@ import SpecimenTest.StrataLexprGen
 
 open Lambda
 
-/-- The same concrete metadata specialization used by the existing Strata
-    workaround, but here we keep the *actual parameterized* `Lambda.LExpr`
-    instead of copying its constructors into `LExprU`. -/
+/-- Concrete metadata specialization used only for the executable sample gate.
+    The derivation itself below is generic in `T`; this avoids baking a constant
+    structure expression into a position where Specimen requires an input
+    variable. -/
 abbrev V118T0 : LExprParams := ⟨Unit, Unit⟩
 abbrev V118RealExpr := LExpr V118T0.mono
 
 /- Directly derive over the real parameterized Strata expression type and the
-   unchanged declarative typing relation. This is the held-out transfer target
-   for the already-frozen V118 K1b mechanism. -/
+   unchanged declarative typing relation. `T` is an input variable, with the
+   ordinary producer assumptions needed for constructor metadata exposed as
+   instance parameters. K1b was frozen before this target was executed. -/
 #guard_msgs(drop info, drop warning) in
 derive_mutual
-  (fun Δ τ => ∃ e : V118RealExpr, LExpr.HasTypeA (T := V118T0) Δ e τ)
+  (fun (T : LExprParams) [Arbitrary T.Metadata] [Arbitrary T.IDMeta] Δ τ =>
+    ∃ e : LExpr T.mono, LExpr.HasTypeA (T := T) Δ e τ)
 
 /-- Executable checker mirroring the unchanged `HasTypeA` rules, used only to
-    independently test generated samples. -/
+    independently test generated samples at the concrete `V118T0` metadata
+    specialization. -/
 def v118TypeCheck (ctx : List LMonoTy) : V118RealExpr → Option LMonoTy
   | .const _ c => some c.ty
   | .op _ _ (some ty) => some ty
