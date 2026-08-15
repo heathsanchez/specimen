@@ -1,0 +1,49 @@
+name: V117 Type-1 acquisition qualification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["v117-fixed-type1-acquisition-v9"]
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Run lower and higher universe fixtures
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V117LowUniverseControl.lean > v117_low.log 2>&1
+          LOW_RC=$?
+          lake env lean SpecimenTest/V117HighUniverseAcquisition.lean > v117_high.log 2>&1
+          HIGH_RC=$?
+          set -e
+          echo "LOW_RC=$LOW_RC"
+          echo "HIGH_RC=$HIGH_RC"
+          echo "--- LOW ---"
+          cat v117_low.log
+          echo "--- HIGH ---"
+          cat v117_high.log
+          printf '{"low_rc":%s,"high_rc":%s}\n' "$LOW_RC" "$HIGH_RC" > v117_acquisition_result.json
+          if [ "$LOW_RC" -ne 0 ]; then
+            echo "INVALID: lower-universe control failed"
+            exit 10
+          fi
+          if [ "$HIGH_RC" -eq 0 ]; then
+            echo "NULL_WRONG_OBSTRUCTION: higher-universe fixture already constructible"
+            exit 11
+          fi
+          echo "QUALIFIED: lower universe passes while higher-universe analogue fails"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v117-type1-acquisition
+          path: |
+            v117_low.log
+            v117_high.log
+            v117_acquisition_result.json
