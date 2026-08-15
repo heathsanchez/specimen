@@ -36,10 +36,10 @@ new = '''def linearizeAndFlatten
   for i in [:conclusionArgs.size] do
     if i ∉ outputIndices then
       inputPositionFVars := inputPositionFVars ++ collectFVarIds conclusionArgs[i]!
-  let inputPositionFVars := List.eraseDups inputPositionFVars
+  let fixedInputFVars := List.eraseDups inputPositionFVars
   let funcAppExprs := candidateFuncAppExprs.filter (fun e =>
     let deps := List.eraseDups (collectFVarIds e)
-    !(deps.all (· ∈ inputPositionFVars)))
+    !(deps.all (· ∈ fixedInputFVars)))
 '''
 
 if old not in text:
