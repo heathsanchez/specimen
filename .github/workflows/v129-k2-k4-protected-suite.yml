@@ -1,0 +1,63 @@
+name: V129 K2 K4 protected suite
+
+on:
+  push:
+    branches: ["v120-binder-aware-fixed-parameter"]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+
+      - name: K0 ordinary build and test
+        run: |
+          lake build
+          lake test
+
+      - name: Apply exact frozen K2 and K4
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v128_apply_input_position_computed_parameter.py
+          git diff -- Specimen/DeriveConstrainedProducer.lean | tee v129_k2_k4.patch
+
+      - name: K2 K4 ordinary build and test
+        run: |
+          lake build
+          lake test
+
+      - name: Recheck V128 acquisition
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          src=Path('SpecimenTest/V126ComputedParameterBridgeDiscriminator.lean').read_text()
+          common=src.split('/-- ID arm. -/',1)[0]
+          Path('/tmp/V126MAP.lean').write_text(common + 'derive_mutual (fun (p : V126Base) (n : Nat) => ∃ b : V126BoxMap (V126Lift p), V126HasMap b n)\n')
+          PY
+          set +e
+          lake env lean /tmp/V126MAP.lean > v129_map.log 2>&1
+          MAP=$?
+          set -e
+          echo "MAP=$MAP"
+          cat v129_map.log
+          printf '{"map":%s}\n' "$MAP" > v129_result.json
+          if [ "$MAP" -ne 0 ]; then
+            echo "HARMFUL_PROTECTED_COMPOSITION_OR_ACQUISITION_DRIFT"
+            exit 101
+          fi
+          echo "PASS_V129_K2_K4_PROTECTED_SUITE"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v129-k2-k4-protected-suite
+          path: |
+            v129_k2_k4.patch
+            v129_map.log
+            v129_result.json
