@@ -56,29 +56,36 @@ new_map = '''  let argNames ← constrArgs.mapIdxM
       else
         pure ((`fixedArg).appendAfter s!"_{i}"))
   let argNamesTypes := argNames.zip argTypes
-  let argDecls := (argNamesTypes.zip constrArgs.toList).mapIdx (fun i x =>
-    let ((n, ty), original) := x
-    let preserve := if original.isFVar || outputIdxs.contains i then none else some original
-    (n, ty, preserve))
+  let argDecls : List (Name × Expr × Option Expr) :=
+    (argNamesTypes.zip constrArgs).toList.mapIdx (fun i x =>
+      let ((n, ty), (original : Expr)) := x
+      let preserve : Option Expr := if Expr.isFVar original || outputIdxs.contains i then none else some original
+      (n, ty, preserve))
 '''
 count = text.count(old_map_a) + text.count(old_map_b)
-# The current pinned source has three structurally distinct derivation paths
-# containing this applicability guard. The first V140 runner incorrectly
-# expected six because earlier grep output duplicated snippet contexts.
 if count != 3:
     raise SystemExit(f"V140 expected 3 arg-name anchors in pinned source, found {count}")
 text = text.replace(old_map_a, new_map).replace(old_map_b, new_map)
 
-# Each of those derivation paths builds its temporary relation-argument context
-# from argNamesTypes. Route the same body through the mixed declaration helper.
+# Exactly four textual context anchors exist in the pinned source, but one is
+# the memoized deriveBestInductiveSchedule path and has no constrArgs/argDecls.
+# Preserve that path unchanged; rewrite only the three acquisition/codegen paths
+# that contain the frozen applicability guard above.
 paren_old = 'withLocalDeclsDND argNamesTypes (fun _ => do'
 paren_new = 'withPreservedFixedArgumentDecls argDecls (do'
 bare_old = 'withLocalDeclsDND argNamesTypes fun _ => do'
 bare_new = 'withPreservedFixedArgumentDecls argDecls do'
-replaced = text.count(paren_old) + text.count(bare_old)
-if replaced < 3:
-    raise SystemExit(f"V140 expected at least 3 context anchors in pinned source, found {replaced}")
 text = text.replace(paren_old, paren_new).replace(bare_old, bare_new)
+# Restore the one unrelated memoized-schedule context verbatim.
+memo_patched = 'let results ← withPreservedFixedArgumentDecls argDecls do'
+memo_original = 'let results ← withLocalDeclsDND argNamesTypes fun _ => do'
+if memo_patched not in text:
+    raise SystemExit("V140 memo-context separator not found")
+text = text.replace(memo_patched, memo_original, 1)
+
+remaining = text.count('withPreservedFixedArgumentDecls argDecls')
+if remaining != 3:
+    raise SystemExit(f"V140 expected exactly 3 preserved-fixed contexts, found {remaining}")
 
 path.write_text(text)
-print(f"V140 K6 applied: arg-name anchors={count}, context anchors={replaced}")
+print(f"V140 K6 applied: arg-name anchors={count}, preserved contexts={remaining}")
