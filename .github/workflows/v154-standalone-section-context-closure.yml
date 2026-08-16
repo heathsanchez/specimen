@@ -1,0 +1,113 @@
+name: V154 standalone section context closure
+
+on:
+  push:
+    branches: ["v154-standalone-section-context-closure"]
+    paths:
+      - '.github/workflows/v154-standalone-section-context-closure.yml'
+      - 'experiments/V154_STANDALONE_SECTION_CONTEXT_CLOSURE_PREREG.md'
+  workflow_dispatch:
+
+jobs:
+  closure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact admitted K2 K5 only
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Freeze section-context arms
+        run: |
+          cat > /tmp/V154Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V154P where Meta : Type
+          def V154P0 : V154P := ⟨Unit⟩
+          abbrev V154PA : V154P := ⟨Unit⟩
+          inductive V154Box (p : V154P) : Type where | mk : p.Meta → V154Box p
+          inductive V154Has {p : V154P} : V154Box p → Prop where | mk (x : p.Meta) : V154Has (V154Box.mk x)
+          EOF
+          cp /tmp/V154Common.lean /tmp/V154S0.lean
+          echo 'derive_generator (fun (p : V154P) => ∃ b : V154Box p, V154Has b)' >> /tmp/V154S0.lean
+          cp /tmp/V154Common.lean /tmp/V154S1.lean
+          cat >> /tmp/V154S1.lean <<'EOF'
+          section
+          variable (p : V154P) [Plausible.Arbitrary p.Meta]
+          derive_generator (fun (_ : Unit) => ∃ b : V154Box p, V154Has b)
+          end
+          EOF
+          cp /tmp/V154Common.lean /tmp/V154S2.lean
+          cat >> /tmp/V154S2.lean <<'EOF'
+          section
+          variable (p : V154P) [Plausible.Arbitrary p.Meta]
+          derive_generator (fun (_ : Unit) => ∃ b : V154Box p, V154Has b)
+          end
+          instance : Plausible.Arbitrary V154P0.Meta := by
+            change Plausible.Arbitrary Unit
+            infer_instance
+          #synth ArbitrarySizedSuchThat (V154Box V154P0) (fun b => V154Has b)
+          EOF
+          cp /tmp/V154Common.lean /tmp/V154S3.lean
+          cat >> /tmp/V154S3.lean <<'EOF'
+          section
+          variable (p : V154P) [Plausible.Arbitrary p.Meta]
+          derive_generator (fun (_ : Unit) => ∃ b : V154Box p, V154Has b)
+          end
+          #synth ArbitrarySizedSuchThat (V154Box V154PA) (fun b => V154Has b)
+          EOF
+      - name: Run S0-S3
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          out={}
+          for n in range(4):
+            k=f'S{n}'; p=subprocess.run(['lake','env','lean',f'/tmp/V154{k}.lean'],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v154_{k}.log').write_text(log); lo=log.lower()
+            if p.returncode==0:c='PASS'
+            elif 'failed to synthesize' in lo and ('meta' in lo or 'arbitrary' in lo):c='SYMBOLIC_INSTANCE'
+            elif 'expected to be a variable' in lo:c='NON_FVAR_APPLICABILITY'
+            elif 'unknown identifier' in lo or 'unexpected' in lo:c='APPARATUS_OR_SCOPE'
+            else:c='OTHER_FAILURE'
+            out[k]={'rc':p.returncode,'class':c,'tail':log[-7000:]}
+          pathlib.Path('v154_arms.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Protected baseline suite
+        run: |
+          set +e; lake build > v154_build.log 2>&1; B=$?; lake test > v154_test.log 2>&1; T=$?; set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v154_protected.json
+          [ "$B" -eq 0 ] && [ "$T" -eq 0 ]
+      - name: Frozen V154 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          a=json.loads(pathlib.Path('v154_arms.json').read_text()) if pathlib.Path('v154_arms.json').exists() else None
+          p=json.loads(pathlib.Path('v154_protected.json').read_text()) if pathlib.Path('v154_protected.json').exists() else None
+          if a is None or p is None:r={'canonical_id':'V154_STANDALONE_SECTION_CONTEXT_CLOSURE','verdict':'R10_INCONCLUSIVE'}
+          else:
+            c=lambda n:a[f'S{n}']['class']; prot=p.get('build')==0 and p.get('test')==0
+            if c(0)!='SYMBOLIC_INSTANCE' or not prot:v='R10_CONTROL_OR_PROTECTED_FAILURE'
+            elif c(1)=='PASS' and (c(2)=='PASS' or c(3)=='PASS'):v='REJECT_K6_OLD_STANDALONE_SECTION_CLOSURE_SUFFICES'
+            elif c(1) in ('APPARATUS_OR_SCOPE',):v='R10_SECTION_CONTEXT_NOT_EXERCISED'
+            else:v='PASS_V154_SECTION_CONTEXT_RIVAL_KILLED'
+            r={'canonical_id':'V154_STANDALONE_SECTION_CONTEXT_CLOSURE','arms':{k:x['class'] for k,x in a.items()},'protected':p,'verdict':v,'claim_boundary':'Old-mechanism closure only; no constructor-development claim.'}
+          pathlib.Path('v154_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v154_result.json || true
+          for f in v154_S*.log; do echo ==== $f ====; cat "$f"; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v154-standalone-section-context-closure
+          path: v154_*
