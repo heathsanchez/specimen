@@ -1,0 +1,132 @@
+name: V164 live output type reconstruction
+
+on:
+  push:
+    branches: ["v164-live-output-type-reconstruction"]
+    paths:
+      - '.github/workflows/v164-live-output-type-reconstruction.yml'
+      - 'experiments/V164_LIVE_OUTPUT_TYPE_RECONSTRUCTION_PREREG.md'
+      - 'scripts/v164_apply_live_output_type_reconstruction.py'
+  workflow_dispatch:
+
+jobs:
+  reconstruction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact admitted K2 K5 only
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Freeze ablation and intervention fixtures
+        run: |
+          cat > /tmp/V164D0.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V164P0 where A : Type
+          inductive V164R0 (p : V164P0) : Option p.A → Prop where
+            | none : V164R0 p none
+          derive_generator (fun (p : V164P0) => ∃ x : Option p.A, V164R0 p x)
+          EOF
+          cat > /tmp/V164D1.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V164P1 where A : Type
+          inductive V164R1 (p : V164P1) : Option p.A → Prop where
+            | some (a : p.A) : V164R1 p (some a)
+          derive_generator (fun (p : V164P1) => ∃ x : Option p.A, V164R1 p x)
+          EOF
+          cat > /tmp/V164C.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          inductive V164RC (α : Type) : Option α → Prop where
+            | some (a : α) : V164RC α (some a)
+          derive_generator (fun (α : Type) => ∃ x : Option α, V164RC α x)
+          EOF
+          cat > /tmp/V164REC.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V164Schema where Atom : Type
+          inductive V164Seq (s : V164Schema) : Nat → List s.Atom → Prop where
+            | nil : V164Seq s 0 []
+            | cons (x : s.Atom) {n : Nat} {xs : List s.Atom} : V164Seq s n xs → V164Seq s (Nat.succ n) (x :: xs)
+          derive_generator (fun (s : V164Schema) (n : Nat) => ∃ xs : List s.Atom, V164Seq s n xs)
+          EOF
+      - name: Run frozen ablations
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          out={}
+          for name in ['D0','D1']:
+            p=subprocess.run(['lake','env','lean',f'/tmp/V164{name}.lean'],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v164_A_{name}.log').write_text(log); lo=log.lower()
+            c='PASS' if p.returncode==0 else ('FREE_FVAR' if 'unknown free variable' in lo else 'OTHER_FAILURE')
+            out[name]={'rc':p.returncode,'class':c,'tail':log[-8000:]}
+          pathlib.Path('v164_ablation.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Apply frozen V164 candidate
+        run: |
+          python scripts/v164_apply_live_output_type_reconstruction.py | tee v164_apply.log
+          git diff -- Specimen/DeriveConstrainedProducer.lean > v164_candidate.patch
+          if grep -Eq 'V164P0|V164P1|V164Schema|V164Seq' v164_candidate.patch; then
+            echo fixture-specific-token-leak
+            exit 164
+          fi
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Run frozen intervention arms
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          out={}
+          for name in ['D0','D1','C','REC']:
+            p=subprocess.run(['lake','env','lean',f'/tmp/V164{name}.lean'],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v164_I_{name}.log').write_text(log); lo=log.lower()
+            if p.returncode==0:c='PASS'
+            elif 'unknown free variable' in lo:c='FREE_FVAR'
+            elif 'failed to synthesize' in lo:c='SYNTH_FAILURE'
+            elif 'unable to derive producer schedule' in lo or 'cannot derive constrained producer' in lo:c='SCHEDULE_FAILURE'
+            else:c='OTHER_FAILURE'
+            out[name]={'rc':p.returncode,'class':c,'tail':log[-12000:]}
+          pathlib.Path('v164_intervention.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Protected suite
+        continue-on-error: true
+        run: |
+          set +e; lake build > v164_build.log 2>&1; B=$?; lake test > v164_test.log 2>&1; T=$?; set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v164_protected.json
+          exit 0
+      - name: Frozen V164 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def load(p): return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
+          a=load('v164_ablation.json'); i=load('v164_intervention.json'); p=load('v164_protected.json')
+          if a is None or i is None or p is None:v='R10_INCONCLUSIVE'
+          elif a['D0']['class']!='FREE_FVAR' or a['D1']['class']!='FREE_FVAR':v='R10_ABLATION_NOT_REPRODUCED'
+          elif p.get('build')!=0 or p.get('test')!=0:v='R10_PROTECTED_FAILURE'
+          elif i['D0']['class']=='PASS' and i['D1']['class']!='FREE_FVAR' and i['REC']['class']!='FREE_FVAR' and i['C']['class']=='PASS':v='PASS_V164_LIVE_OUTPUT_TYPE_RECONSTRUCTION_CAUSAL'
+          else:v='NEGATIVE_V164_RECONSTRUCTION_NOT_SUFFICIENT'
+          r={'canonical_id':'V164_LIVE_OUTPUT_TYPE_RECONSTRUCTION','ablation':None if a is None else {k:x['class'] for k,x in a.items()},'intervention':None if i is None else {k:x['class'] for k,x in i.items()},'protected':p,'verdict':v,'claim_boundary':'Source-informed stale output-type binder repair only; no requirement/dependency/novelty claim.'}
+          pathlib.Path('v164_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v164_result.json || true
+          for f in v164_A_*.log v164_I_*.log; do [ -f "$f" ] && { echo ==== $f ====; cat "$f"; }; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v164-live-output-type-reconstruction
+          path: v164_*
