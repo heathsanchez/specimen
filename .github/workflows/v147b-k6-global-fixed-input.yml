@@ -1,0 +1,126 @@
+name: V147b K6 global fixed input
+
+on:
+  push:
+    branches: ["v147b-k6-global-fixed-input"]
+  workflow_dispatch:
+
+jobs:
+  k6:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: false
+          test: false
+      - name: Apply exact admitted K2 K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Freeze baseline fixture
+        run: |
+          cat > /tmp/V147Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V147P where Meta : Type
+          def V147P0 : V147P := ⟨Unit⟩
+          inductive V147Box (p : V147P) : Type where | mk : p.Meta → V147Box p
+          inductive V147Has {p : V147P} : V147Box p → Prop where | mk (x : p.Meta) : V147Has (V147Box.mk x)
+          EOF
+          cp /tmp/V147Common.lean /tmp/V147B.lean
+          cat >> /tmp/V147B.lean <<'EOF'
+          set_option specimen.autoDeriveDeps false in
+          derive_mutual (fun (_ : Unit) => ∃ b : V147Box V147P0, V147Has b)
+          EOF
+          cp /tmp/V147B.lean /tmp/V147A.lean
+      - name: Run baseline and targeted ablation
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          out={}
+          for n in ['B','A']:
+              p=subprocess.run(['lake','env','lean',f'/tmp/V147{n}.lean'],capture_output=True,text=True)
+              log=p.stdout+p.stderr; pathlib.Path(f'v147_{n}.log').write_text(log); lo=log.lower()
+              if p.returncode==0: c='PASS'
+              elif 'expected to be a variable' in lo: c='NON_FVAR_APPLICABILITY'
+              else: c='OTHER_FAILURE'
+              out[n]={'rc':p.returncode,'class':c,'first_error':next((x for x in log.splitlines() if 'error' in x.lower()),'')}
+          pathlib.Path('v147_baseline.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n'); print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+      - name: Apply K6 intervention and static audit
+        run: |
+          python scripts/v147b_apply_global_fixed_input.py
+          git diff -- Specimen/DeriveConstrainedProducer.lean Specimen/MakeConstrainedProducerInstance.lean | tee v147_k6.patch
+          if grep -Eq 'V147|V147P|V147Box|V147Has|V147P0' v147_k6.patch; then
+            echo TARGET_SPECIFIC_PATCH
+            exit 147
+          fi
+          lake build Specimen.DeriveConstrainedProducer Specimen.MakeConstrainedProducerInstance
+      - name: Materialize intervention and generic control
+        run: |
+          cp /tmp/V147Common.lean /tmp/V147I.lean
+          cat >> /tmp/V147I.lean <<'EOF'
+          set_option specimen.autoDeriveDeps false in
+          derive_mutual (fun (_ : Unit) => ∃ b : V147Box V147P0, V147Has b)
+          #synth ArbitrarySizedSuchThat (V147Box V147P0) (fun b => V147Has b)
+          EOF
+          cp /tmp/V147Common.lean /tmp/V147G.lean
+          cat >> /tmp/V147G.lean <<'EOF'
+          set_option specimen.autoDeriveDeps false in
+          derive_mutual (fun (p : V147P) (_ : Unit) => ∃ b : V147Box p, V147Has b)
+          EOF
+      - name: Run intervention and generic control
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          out={}
+          for n in ['I','G']:
+              p=subprocess.run(['lake','env','lean',f'/tmp/V147{n}.lean'],capture_output=True,text=True)
+              log=p.stdout+p.stderr; pathlib.Path(f'v147_{n}.log').write_text(log); lo=log.lower()
+              if p.returncode==0: c='PASS'
+              elif 'expected to be a variable' in lo: c='NON_FVAR_APPLICABILITY'
+              elif 'failed to synthesize' in lo and 'arbitrary' in lo and 'meta' in lo: c='SYMBOLIC_INSTANCE'
+              elif 'unknown identifier' in lo or 'unknown free variable' in lo: c='CONTEXT_FAILURE'
+              else: c='OTHER_FAILURE'
+              out[n]={'rc':p.returncode,'class':c,'first_error':next((x for x in log.splitlines() if 'error' in x.lower()),'')}
+          pathlib.Path('v147_intervention.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n'); print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+      - name: Protected suite under K6
+        run: |
+          set +e
+          lake build > v147_build.log 2>&1; B=$?
+          lake test > v147_test.log 2>&1; T=$?
+          set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v147_protected.json
+          [ "$B" -eq 0 ] && [ "$T" -eq 0 ]
+      - name: Frozen verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          b=json.loads(pathlib.Path('v147_baseline.json').read_text()) if pathlib.Path('v147_baseline.json').exists() else {}
+          i=json.loads(pathlib.Path('v147_intervention.json').read_text()) if pathlib.Path('v147_intervention.json').exists() else {}
+          p=json.loads(pathlib.Path('v147_protected.json').read_text()) if pathlib.Path('v147_protected.json').exists() else None
+          c=lambda d,k:d.get(k,{}).get('class')
+          gates={'B_nonfvar':c(b,'B')=='NON_FVAR_APPLICABILITY','A_nonfvar':c(b,'A')=='NON_FVAR_APPLICABILITY','I_pass':c(i,'I')=='PASS','G_symbolic':c(i,'G')=='SYMBOLIC_INSTANCE','protected':p is not None and p.get('build')==0 and p.get('test')==0,'patch_audit':pathlib.Path('v147_k6.patch').exists()}
+          if not b or not i or p is None: v='R10_INCONCLUSIVE'
+          elif all(gates.values()): v='PASS_V147B_LOCAL_K6_GLOBAL_FIXED_INPUT'
+          elif gates['B_nonfvar'] and gates['A_nonfvar'] and gates['protected']: v='NEGATIVE_K6_CANDIDATE_DID_NOT_CLOSE'
+          else: v='R10_OR_CONTROL_INCONCLUSIVE'
+          r={'canonical_id':'V147B_K6_GLOBAL_FIXED_INPUT','baseline_ablation':b,'intervention_generic':i,'protected':p,'gates':gates,'verdict':v,'claim_boundary':'A local PASS is not K6 admission and not constructor development.'}
+          pathlib.Path('v147_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          for f in v147_[BAIG].log; do [ -e "$f" ] && { echo =====$f=====; cat "$f"; }; done
+          cat v147_result.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v147b-k6-global-fixed-input
+          path: v147_*
