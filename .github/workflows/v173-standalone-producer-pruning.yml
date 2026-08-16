@@ -1,0 +1,102 @@
+name: V173 standalone producer pruning
+on:
+  push:
+    branches: ["v173-standalone-producer-pruning"]
+    paths: ['.github/workflows/v173-standalone-producer-pruning.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: false, test: false, lint: false}
+      - name: Freeze hashes and apparatus
+        run: |
+          set -euo pipefail
+          lake --version
+          sha256sum protocols/V173_STANDALONE_PRODUCER_PRUNING.md \
+            fixtures/V170_ISSUE19_PARAMETER_OVERCONSTRAINT.lean \
+            fixtures/V171_GENERATED_TYPE_SAFETY.lean fixtures/V171_EQUALITY_TYPEPARAM_SAFETY.lean \
+            scripts/v120_apply_binder_aware_fixed_parameter.py scripts/v132_apply_output_dependent_input_determined.py \
+            scripts/v156_apply_requirement_provenance_promotion.py scripts/v156b_apply_checker_consumer_compat.py \
+            scripts/v158_apply_scope_dependent_promotion.py scripts/v168_apply_certified_constructor_irrefutability.py \
+            scripts/v173_apply_standalone_producer_typeparam_pruning.py | tee v173_hashes.txt
+      - name: Define frozen helpers
+        run: |
+          cat > /tmp/v173.sh <<'SH'
+          set -euo pipefail
+          prior() {
+            python scripts/v120_apply_binder_aware_fixed_parameter.py
+            python scripts/v132_apply_output_dependent_input_determined.py
+            python scripts/v156_apply_requirement_provenance_promotion.py
+            python scripts/v156b_apply_checker_consumer_compat.py
+            python scripts/v158_apply_scope_dependent_promotion.py
+            python scripts/v168_apply_certified_constructor_irrefutability.py
+          }
+          clean() { git checkout HEAD -- Specimen SpecimenTest; rm -rf .lake/build; }
+          build() { lake build Plausible Specimen; }
+          probe() { local f="$1" p="$2"; set +e; lake env lean "$f" > "$p.log" 2>&1; local r=$?; set -e; echo "$r" > "$p.rc"; }
+          SH
+      - name: Arm A prior stack
+        run: |
+          source /tmp/v173.sh
+          clean; prior > v173_A_apply.log 2>&1; build > v173_A_build.log 2>&1
+          probe fixtures/V170_ISSUE19_PARAMETER_OVERCONSTRAINT.lean v173_A_natural
+          probe fixtures/V171_GENERATED_TYPE_SAFETY.lean v173_A_generated
+          probe fixtures/V171_EQUALITY_TYPEPARAM_SAFETY.lean v173_A_equality
+      - name: Arm B scoped pruning and protected gate
+        run: |
+          source /tmp/v173.sh
+          clean; prior > v173_B_prior.log 2>&1
+          python scripts/v173_apply_standalone_producer_typeparam_pruning.py | tee v173_B_prune.log
+          grep -q V173_STANDALONE_PRODUCER_TYPEPARAM_PRUNING_APPLIED v173_B_prune.log
+          build > v173_B_build.log 2>&1
+          probe fixtures/V170_ISSUE19_PARAMETER_OVERCONSTRAINT.lean v173_B_natural
+          probe fixtures/V171_GENERATED_TYPE_SAFETY.lean v173_B_generated
+          probe fixtures/V171_EQUALITY_TYPEPARAM_SAFETY.lean v173_B_equality
+          set +e
+          lake test > v173_B_test.log 2>&1
+          echo $? > v173_B_test.rc
+          set -e
+      - name: Arm C independent ablation
+        if: always()
+        run: |
+          source /tmp/v173.sh
+          clean; prior > v173_C_apply.log 2>&1; build > v173_C_build.log 2>&1
+          probe fixtures/V170_ISSUE19_PARAMETER_OVERCONSTRAINT.lean v173_C_natural
+      - name: Frozen V173 classification
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def arm(p):
+            rp=pathlib.Path(p+'.rc'); lp=pathlib.Path(p+'.log')
+            rc=int(rp.read_text().strip()) if rp.exists() else None
+            log=lp.read_text(errors='replace') if lp.exists() else ''
+            return {'rc':rc,'failed_synth':'failed to synthesize' in log.lower(),'tail':log[-1600:]}
+          A={k:arm('v173_A_'+k) for k in ['natural','generated','equality']}
+          B={k:arm('v173_B_'+k) for k in ['natural','generated','equality']}
+          C={'natural':arm('v173_C_natural')}
+          test_rc=int(pathlib.Path('v173_B_test.rc').read_text().strip()) if pathlib.Path('v173_B_test.rc').exists() else None
+          apparatus=not all(pathlib.Path(x).exists() for x in ['v173_A_build.log','v173_B_build.log','v173_B_prune.log','v173_B_test.rc','v173_C_build.log'])
+          gates={'A_natural_fails':A['natural']['rc'] not in (None,0),'A_generated_passes':A['generated']['rc']==0,'A_equality_passes':A['equality']['rc']==0,
+                 'B_natural_rescued':B['natural']['rc']==0,'B_generated_passes':B['generated']['rc']==0,'B_equality_passes':B['equality']['rc']==0,
+                 'B_protected_tests_pass':test_rc==0,'C_natural_restores':C['natural']['rc'] not in (None,0)}
+          if apparatus: verdict='R10_V173_INCONCLUSIVE'
+          elif all(gates.values()): verdict='PASS_V173_STANDALONE_PRUNING_ADMITTED'
+          elif gates['B_natural_rescued'] and not gates['B_protected_tests_pass']: verdict='NEGATIVE_V173_SCOPED_PRUNING_NOT_ADMITTED'
+          else: verdict='NEGATIVE_V173_SCOPED_PRUNING_NOT_SUFFICIENT'
+          out={'canonical_id':'V173_STANDALONE_PRODUCER_PRUNING','apparatus':apparatus,'gates':gates,'test_rc':test_rc,'A':A,'B':B,'C':C,'verdict':verdict}
+          pathlib.Path('v173_result.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v173_result.json || true
+          tail -120 v173_B_test.log 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: v173-standalone-producer-pruning, path: 'v173*', retention-days: 90}
