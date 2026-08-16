@@ -1,0 +1,195 @@
+name: V166 K7 exhaustive-match fallthrough elision
+on:
+  push:
+    branches: ["v166-k7-exhaustive-match-fallthrough-elision"]
+    paths: ['.github/workflows/v166-k7-exhaustive-match-fallthrough-elision.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: default, test: false, lint: false}
+
+      - name: Freeze protocol fixtures and mechanisms
+        run: |
+          set -euo pipefail
+          sha256sum \
+            protocols/V166_K7_EXHAUSTIVE_MATCH_FALLTHROUGH_ELISION.md \
+            fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean \
+            fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean \
+            fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean \
+            scripts/v120_apply_binder_aware_fixed_parameter.py \
+            scripts/v132_apply_output_dependent_input_determined.py \
+            scripts/v156_apply_requirement_provenance_promotion.py \
+            scripts/v156b_apply_checker_consumer_compat.py \
+            scripts/v158_apply_scope_dependent_promotion.py \
+            scripts/v166_apply_exhaustive_match_fallthrough_elision.py \
+            | tee v166_hashes.txt
+
+      - name: Define experiment helpers
+        run: |
+          cat > /tmp/v166_helpers.sh <<'SH'
+          set -euo pipefail
+          apply_prior_stack() {
+            python scripts/v120_apply_binder_aware_fixed_parameter.py
+            python scripts/v132_apply_output_dependent_input_determined.py
+            python scripts/v156_apply_requirement_provenance_promotion.py
+            python scripts/v156b_apply_checker_consumer_compat.py
+            python scripts/v158_apply_scope_dependent_promotion.py
+          }
+          clean_source() {
+            git checkout HEAD -- Specimen SpecimenTest
+            rm -rf .lake/build
+          }
+          rebuild() {
+            lake build Plausible Specimen
+          }
+          run_fixture() {
+            local fixture="$1" out="$2"
+            set +e
+            lake env lean "$fixture" > "$out.log" 2>&1
+            local rc=$?
+            set -e
+            echo "$rc" > "$out.rc"
+          }
+          SH
+
+      - name: Arm A prior stack only
+        run: |
+          set -euo pipefail
+          source /tmp/v166_helpers.sh
+          clean_source
+          apply_prior_stack | tee v166_A_apply.log
+          rebuild > v166_A_build.log 2>&1
+          run_fixture fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean v166_A_natural
+          run_fixture fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean v166_A_heldout
+          run_fixture fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean v166_A_safety
+
+      - name: Arm B prior stack plus K7
+        run: |
+          set -euo pipefail
+          source /tmp/v166_helpers.sh
+          clean_source
+          apply_prior_stack | tee v166_B_prior_apply.log
+          python scripts/v166_apply_exhaustive_match_fallthrough_elision.py | tee v166_B_k7_apply.log
+          grep -q K7_EXHAUSTIVE_MATCH_FALLTHROUGH_ELISION_APPLIED v166_B_k7_apply.log
+          git diff -- Specimen > v166_B_production.diff
+          test -s v166_B_production.diff
+          if grep -E 'V165|V166|ISSUE12|Issue12|S\.mk|V166Packet|V166Choice|fixtures/' v166_B_production.diff; then
+            echo K7_STATIC_AUDIT_TARGET_TOKEN_LEAK
+            exit 91
+          fi
+          rebuild > v166_B_build.log 2>&1
+          run_fixture fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean v166_B_natural
+          run_fixture fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean v166_B_heldout
+          run_fixture fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean v166_B_safety
+          lake test > v166_B_test.log 2>&1
+
+      - name: Arm C independent K7 ablation
+        run: |
+          set -euo pipefail
+          source /tmp/v166_helpers.sh
+          clean_source
+          apply_prior_stack | tee v166_C_apply.log
+          rebuild > v166_C_build.log 2>&1
+          run_fixture fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean v166_C_natural
+          run_fixture fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean v166_C_heldout
+          run_fixture fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean v166_C_safety
+
+      - name: Frozen V166 classification
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, pathlib
+
+          def read_arm(prefix):
+              p = pathlib.Path(prefix + '.rc')
+              rc = int(p.read_text().strip()) if p.exists() else None
+              lp = pathlib.Path(prefix + '.log')
+              log = lp.read_text(errors='replace') if lp.exists() else ''
+              lo = log.lower()
+              return {
+                  'rc': rc,
+                  'redundant': ('redundantmatchalt' in lo or 'redundant alternative' in lo),
+                  'apparatus': any(x in lo for x in ['unknown module prefix', 'object file']),
+                  'missing_instance': 'failed to synthesize' in lo,
+                  'tail': log[-2500:],
+              }
+
+          A_nat = read_arm('v166_A_natural')
+          A_hold = read_arm('v166_A_heldout')
+          A_safe = read_arm('v166_A_safety')
+          B_nat = read_arm('v166_B_natural')
+          B_hold = read_arm('v166_B_heldout')
+          B_safe = read_arm('v166_B_safety')
+          C_nat = read_arm('v166_C_natural')
+          C_hold = read_arm('v166_C_heldout')
+          C_safe = read_arm('v166_C_safety')
+
+          required_files = [
+              'v166_A_build.log','v166_B_build.log','v166_B_test.log','v166_C_build.log',
+              'v166_B_k7_apply.log','v166_B_production.diff'
+          ]
+          apparatus = (
+              not all(pathlib.Path(x).exists() for x in required_files)
+              or any(x['apparatus'] for x in [A_nat,A_hold,A_safe,B_nat,B_hold,B_safe,C_nat,C_hold,C_safe])
+          )
+          gates = {
+              'A_natural_reproduces': A_nat['rc'] not in (None,0) and A_nat['redundant'],
+              'A_heldout_reproduces': A_hold['rc'] not in (None,0) and A_hold['redundant'],
+              'A_safety_passes': A_safe['rc'] == 0,
+              'B_natural_passes': B_nat['rc'] == 0,
+              'B_heldout_passes': B_hold['rc'] == 0,
+              'B_safety_passes': B_safe['rc'] == 0,
+              'C_natural_restores': C_nat['rc'] not in (None,0) and C_nat['redundant'],
+              'C_heldout_restores': C_hold['rc'] not in (None,0) and C_hold['redundant'],
+              'C_safety_passes': C_safe['rc'] == 0,
+              'B_full_build_present': pathlib.Path('v166_B_build.log').exists(),
+              'B_full_test_present': pathlib.Path('v166_B_test.log').exists(),
+              'K7_applied': pathlib.Path('v166_B_k7_apply.log').exists() and 'K7_EXHAUSTIVE_MATCH_FALLTHROUGH_ELISION_APPLIED' in pathlib.Path('v166_B_k7_apply.log').read_text(errors='replace'),
+              'production_diff_present': pathlib.Path('v166_B_production.diff').exists() and pathlib.Path('v166_B_production.diff').stat().st_size > 0,
+          }
+          if apparatus:
+              verdict = 'R10_V166_INCONCLUSIVE'
+          elif all(gates.values()):
+              verdict = 'PASS_V166_K7_ADMITTED_BOUNDED_NATURAL_CONSTRUCTOR_DEVELOPMENT'
+          else:
+              verdict = 'FAIL_V166_K7_NOT_ADMITTED'
+
+          out = {
+              'canonical_id':'V166_K7_EXHAUSTIVE_MATCH_FALLTHROUGH_ELISION',
+              'apparatus': apparatus,
+              'gates': gates,
+              'arms': {'A':{'natural':A_nat,'heldout':A_hold,'safety':A_safe},
+                       'B':{'natural':B_nat,'heldout':B_hold,'safety':B_safe},
+                       'C':{'natural':C_nat,'heldout':C_hold,'safety':C_safe}},
+              'verdict': verdict,
+          }
+          pathlib.Path('v166_result.json').write_text(json.dumps(out,indent=2)+'\n')
+          print(json.dumps(out,indent=2))
+          if verdict != 'PASS_V166_K7_ADMITTED_BOUNDED_NATURAL_CONSTRUCTOR_DEVELOPMENT':
+              raise SystemExit(1)
+          PY
+
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v166_result.json || true
+          echo '=== B production diff ==='
+          cat v166_B_production.diff || true
+          echo '=== fixture tails ==='
+          for f in v166_*_natural.log v166_*_heldout.log v166_*_safety.log; do echo "--- $f"; tail -80 "$f" 2>/dev/null || true; done
+          echo '=== B test tail ==='
+          tail -120 v166_B_test.log 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v166-k7-exhaustive-match-fallthrough-elision
+          path: 'v166*'
+          retention-days: 90
