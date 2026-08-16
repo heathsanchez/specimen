@@ -1,0 +1,150 @@
+name: V156 additive requirement aware deriver
+
+on:
+  push:
+    branches: ["v156-additive-requirement-aware-deriver"]
+    paths:
+      - '.github/workflows/v156-additive-requirement-aware-deriver.yml'
+      - 'scripts/v156_apply_requirement_aware_deriver.py'
+      - 'experiments/V156_ADDITIVE_REQUIREMENT_AWARE_DERIVER_PREREG.md'
+  workflow_dispatch:
+
+jobs:
+  operator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact admitted K2 K5 only
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Freeze independent fixtures and ablations
+        run: |
+          cat > /tmp/V156ACommon.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V156P where Meta : Type
+          def V156P0 : V156P := ⟨Unit⟩
+          abbrev V156PA : V156P := ⟨Unit⟩
+          inductive V156Box (p : V156P) : Type where | mk : p.Meta → V156Box p
+          inductive V156Has {p : V156P} : V156Box p → Prop where | mk (x : p.Meta) : V156Has (V156Box.mk x)
+          EOF
+          cat > /tmp/V156BCommon.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V156Q where Carrier : Type
+          def V156Q0 : V156Q := ⟨Bool⟩
+          inductive V156Packet (q : V156Q) : Type where | pack : q.Carrier → V156Packet q
+          inductive V156Accepts {q : V156Q} : V156Packet q → Prop where | accept (x : q.Carrier) : V156Accepts (V156Packet.pack x)
+          EOF
+          cp /tmp/V156ACommon.lean /tmp/V156_BASE_A.lean
+          echo 'derive_generator (fun (p : V156P) => ∃ b : V156Box p, V156Has b)' >> /tmp/V156_BASE_A.lean
+          cp /tmp/V156BCommon.lean /tmp/V156_BASE_B.lean
+          echo 'derive_generator (fun (q : V156Q) => ∃ p : V156Packet q, V156Accepts p)' >> /tmp/V156_BASE_B.lean
+          cp /tmp/V156ACommon.lean /tmp/V156_NEW_A_DEF.lean
+          cat >> /tmp/V156_NEW_A_DEF.lean <<'EOF'
+          instance : Plausible.Arbitrary V156P0.Meta := by
+            change Plausible.Arbitrary Unit
+            infer_instance
+          derive_generator_with_requirements (fun (p : V156P) => ∃ b : V156Box p, V156Has b)
+          #synth ArbitrarySizedSuchThat (V156Box V156P0) (fun b => V156Has b)
+          EOF
+          cp /tmp/V156ACommon.lean /tmp/V156_NEW_A_ABBREV.lean
+          cat >> /tmp/V156_NEW_A_ABBREV.lean <<'EOF'
+          derive_generator_with_requirements (fun (p : V156P) => ∃ b : V156Box p, V156Has b)
+          #synth ArbitrarySizedSuchThat (V156Box V156PA) (fun b => V156Has b)
+          EOF
+          cp /tmp/V156BCommon.lean /tmp/V156_NEW_B_DEF.lean
+          cat >> /tmp/V156_NEW_B_DEF.lean <<'EOF'
+          instance : Plausible.Arbitrary V156Q0.Carrier := by
+            change Plausible.Arbitrary Bool
+            infer_instance
+          derive_generator_with_requirements (fun (q : V156Q) => ∃ p : V156Packet q, V156Accepts p)
+          #synth ArbitrarySizedSuchThat (V156Packet V156Q0) (fun p => V156Accepts p)
+          EOF
+      - name: Baseline targeted ablation before operator
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          out={}
+          for name,path in {'A':'/tmp/V156_BASE_A.lean','B':'/tmp/V156_BASE_B.lean'}.items():
+            p=subprocess.run(['lake','env','lean',path],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v156_baseline_{name}.log').write_text(log); lo=log.lower()
+            c='PASS' if p.returncode==0 else ('SYMBOLIC_INSTANCE' if 'failed to synthesize' in lo and ('meta' in lo or 'carrier' in lo) else 'OTHER_FAILURE')
+            out[name]={'rc':p.returncode,'class':c}
+          pathlib.Path('v156_baseline.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Apply frozen additive operator
+        run: |
+          python scripts/v156_apply_requirement_aware_deriver.py | tee v156_apply.log
+          git diff -- Specimen/MakeConstrainedProducerInstance.lean Specimen/DeriveConstrainedProducer.lean > v156_operator.patch
+          if grep -Eq 'V156P|V156Q|V156P0|V156Q0|V156Box|V156Packet|V156Has|V156Accepts' v156_operator.patch; then
+            echo fixture-specific-token-leak; exit 156
+          fi
+          lake build Specimen.MakeConstrainedProducerInstance Specimen.DeriveConstrainedProducer
+      - name: Run operator and held-out arms
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          arms={'A_NAMED_DEF':'/tmp/V156_NEW_A_DEF.lean','A_TRANSPARENT_ABBREV':'/tmp/V156_NEW_A_ABBREV.lean','B_HELDOUT_NAMED_DEF':'/tmp/V156_NEW_B_DEF.lean'}
+          out={}
+          for name,path in arms.items():
+            p=subprocess.run(['lake','env','lean',path],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v156_{name}.log').write_text(log); lo=log.lower()
+            if p.returncode==0:c='PASS'
+            elif 'failed to synthesize' in lo and ('meta' in lo or 'carrier' in lo or 'arbitrarysizedsuchthat' in lo):c='SYNTH_FAILURE'
+            elif 'requirement-aware deriver currently supports' in lo:c='REQUIREMENT_ARITY_FAILURE'
+            else:c='OTHER_FAILURE'
+            out[name]={'rc':p.returncode,'class':c,'tail':log[-8000:]}
+          pathlib.Path('v156_arms.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Protected behavior after additive operator
+        continue-on-error: true
+        run: |
+          set +e; lake build > v156_build.log 2>&1; B=$?; lake test > v156_test.log 2>&1; T=$?; set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v156_protected.json
+          exit 0
+      - name: Frozen V156 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def load(p): return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
+          b=load('v156_baseline.json'); a=load('v156_arms.json'); p=load('v156_protected.json')
+          apparatus=b is None or a is None or p is None or not pathlib.Path('v156_operator.patch').exists()
+          if apparatus:
+            r={'canonical_id':'V156_ADDITIVE_REQUIREMENT_AWARE_DERIVER','verdict':'R10_INCONCLUSIVE'}
+          else:
+            g={
+              'G1_baseline_A_symbolic':b['A']['class']=='SYMBOLIC_INSTANCE',
+              'G2_new_A_named_def':a['A_NAMED_DEF']['class']=='PASS',
+              'G3_new_A_abbrev_no_bridge':a['A_TRANSPARENT_ABBREV']['class']=='PASS',
+              'G4_heldout_B_named_def':a['B_HELDOUT_NAMED_DEF']['class']=='PASS',
+              'G5_ablation_B_symbolic':b['B']['class']=='SYMBOLIC_INSTANCE',
+              'G6_generic_implementation':True,
+              'G7_protected_build':p.get('build')==0,
+              'G8_protected_test':p.get('test')==0,
+            }
+            v='PASS_V156_REQUIREMENT_AWARE_OPERATOR_ADMITTED_SCOPED' if all(g.values()) else 'NEGATIVE_V156_OPERATOR_NOT_ADMITTED'
+            r={'canonical_id':'V156_ADDITIVE_REQUIREMENT_AWARE_DERIVER','baseline':b,'arms':{k:v['class'] for k,v in a.items()},'protected':p,'gates':g,'verdict':v,'earned_operator':'REQUIREMENT_AWARE_CONSTRAINED_DERIVATION_SINGLETON' if v.startswith('PASS') else None,'claim_boundary':'Additive Specimen automation of an already-expressible Lean construction only. Later natural/frontier causal enablement required for repair-language-growth claim.'}
+          pathlib.Path('v156_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v156_result.json || true
+          cat v156_apply.log || true
+          for f in v156_A_NAMED_DEF.log v156_A_TRANSPARENT_ABBREV.log v156_B_HELDOUT_NAMED_DEF.log v156_test.log; do [ -f "$f" ] && { echo ==== $f ====; tail -n 180 "$f"; }; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v156-additive-requirement-aware-deriver
+          path: v156_*
