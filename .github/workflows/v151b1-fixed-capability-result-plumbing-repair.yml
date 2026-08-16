@@ -1,0 +1,58 @@
+name: V151B1 fixed capability result plumbing repair
+
+on:
+  push:
+    branches: ["v151b1-fixed-capability-result-plumbing-repair"]
+    paths:
+      - '.github/workflows/v151b1-fixed-capability-result-plumbing-repair.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: default, test: false, lint: false}
+      - name: Run byte-identical V151B fixture with repaired reporter
+        run: |
+          sha256sum protocols/V151B_FIXED_CAPABILITY_SYNTHESIS_SEPARATOR_PRECOMMIT.md protocols/V151B1_RESULT_PLUMBING_APPARATUS_ADDENDUM.md
+          cat > /tmp/V151B.lean <<'EOF'
+          import Plausible.Arbitrary
+          structure V151BP where Meta : Type
+          def V151BP0 : V151BP := ⟨Unit⟩
+          structure V151BQ where Carrier : Type
+          def V151BQ0 : V151BQ := ⟨Bool⟩
+          #synth Plausible.Arbitrary Unit
+          #synth Plausible.Arbitrary Bool
+          #synth Plausible.Arbitrary V151BP0.Meta
+          #synth Plausible.Arbitrary V151BQ0.Carrier
+          class V151BWitnessedP (p : V151BP) : Prop where ok : True
+          instance {p : V151BP} [Plausible.Arbitrary p.Meta] : V151BWitnessedP p := ⟨True.intro⟩
+          #synth V151BWitnessedP V151BP0
+          class V151BWitnessedQ (q : V151BQ) : Prop where ok : True
+          instance {q : V151BQ} [Plausible.Arbitrary q.Carrier] : V151BWitnessedQ q := ⟨True.intro⟩
+          #synth V151BWitnessedQ V151BQ0
+          EOF
+          H=$(sha256sum /tmp/V151B.lean | awk '{print $1}')
+          echo "$H" | tee v151b1_fixture_hash.txt
+          test "$H" = "5aa931f24425d2e73170f6eeb946e691dda8dda9a3c5f716cdbb9f0d16fb68b0"
+          set +e
+          lake env lean /tmp/V151B.lean > v151b1_lean.log 2>&1
+          echo $? > v151b1_rc.txt
+          set -e
+          python - <<'PY'
+          import json,pathlib
+          rc=int(pathlib.Path('v151b1_rc.txt').read_text().strip())
+          log=pathlib.Path('v151b1_lean.log').read_text()
+          r={'canonical_id':'V151B_FIXED_CAPABILITY_SYNTHESIS_SEPARATOR','rc':rc,'verdict':'PASS_V151B_FIXED_CAPABILITY_AND_MINIMAL_DEPENDENT_SYNTHESIS' if rc==0 else 'NEGATIVE_V151B_SYNTHESIS_RESIDUAL','log':log[-12000:],'claim_boundary':'Diagnostic only; no K6 earned.','apparatus_repair':'V151B1 byte-identical fixture'}
+          pathlib.Path('v151b1_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v151b1-fixed-capability-synthesis
+          path: v151b1_*
+          if-no-files-found: warn
