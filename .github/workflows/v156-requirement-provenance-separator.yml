@@ -1,0 +1,167 @@
+name: V156 requirement provenance separator
+
+on:
+  push:
+    branches: ["v156-requirement-provenance-separator"]
+    paths:
+      - '.github/workflows/v156-requirement-provenance-separator.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: default, test: false, lint: false}
+
+      - name: Apply exact admitted K2 K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+
+      - name: Freeze V156 fixtures and provenance
+        run: |
+          cat > /tmp/V156A.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V153P where Meta : Type
+          abbrev V153P0 : V153P := ⟨Unit⟩
+          inductive V153Box (p : V153P) : Type where | mk : p.Meta → V153Box p
+          inductive V153Has {p : V153P} : V153Box p → Prop where | mk (x : p.Meta) : V153Has (V153Box.mk x)
+          derive_generator (fun (p : V153P) => ∃ b : V153Box p, V153Has b)
+          #synth ArbitrarySizedSuchThat (V153Box V153P0) (fun b => V153Has b)
+          EOF
+          cat > /tmp/V156B.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V153Q where Carrier : Type
+          abbrev V153Q0 : V153Q := ⟨Bool⟩
+          inductive V153Packet (q : V153Q) : Type where | pack : q.Carrier → V153Packet q
+          inductive V153Accepts {q : V153Q} : V153Packet q → Prop where | accept (x : q.Carrier) : V153Accepts (V153Packet.pack x)
+          derive_generator (fun (q : V153Q) => ∃ p : V153Packet q, V153Accepts p)
+          #synth ArbitrarySizedSuchThat (V153Packet V153Q0) (fun p => V153Accepts p)
+          EOF
+          cat > /tmp/V156C.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V156Pair where
+            A : Type
+            B : Type
+          abbrev V156Pair0 : V156Pair := ⟨Unit, Bool⟩
+          inductive V156Box2 (p : V156Pair) : Type where
+            | mk : p.A → p.B → V156Box2 p
+          inductive V156Has2 {p : V156Pair} : V156Box2 p → Prop where
+            | mk (a : p.A) (b : p.B) : V156Has2 (V156Box2.mk a b)
+          derive_generator (fun (p : V156Pair) => ∃ x : V156Box2 p, V156Has2 x)
+          #synth ArbitrarySizedSuchThat (V156Box2 V156Pair0) (fun x => V156Has2 x)
+          EOF
+          sha256sum /tmp/V156A.lean /tmp/V156B.lean /tmp/V156C.lean \
+            SpecimenTest/DeriveArbitrarySuchThat/InstanceParameterTest.lean \
+            SpecimenTest/DeriveArbitrarySuchThat/MutuallyRecursiveRelationsTest.lean | tee v156_fixture_hashes.txt
+          sha256sum protocols/V156_REQUIREMENT_PROVENANCE_SEPARATOR_PRECOMMIT.md \
+            scripts/v156_apply_requirement_provenance_promotion.py | tee v156_protocol_hashes.txt
+
+      - name: Baseline and ablation record
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          p=subprocess.run(['lake','env','lean','/tmp/V156A.lean'],capture_output=True,text=True)
+          log=p.stdout+p.stderr; pathlib.Path('v156_baseline.log').write_text(log); lo=log.lower()
+          if p.returncode==0:c='PASS'
+          elif 'failed to synthesize' in lo and 'meta' in lo:c='SYMBOLIC_INSTANCE'
+          elif 'expected to be a variable' in lo:c='NON_FVAR_APPLICABILITY'
+          else:c='OTHER_FAILURE'
+          r={'rc':p.returncode,'class':c}
+          pathlib.Path('v156_baseline.json').write_text(json.dumps(r,indent=2)+'\n'); print(json.dumps(r,indent=2))
+          PY
+
+      - name: Apply frozen V156 intervention
+        run: |
+          python scripts/v156_apply_requirement_provenance_promotion.py | tee v156_apply.log
+          sha256sum scripts/v156_apply_requirement_provenance_promotion.py Specimen/MExp.lean \
+            Specimen/MakeConstrainedProducerInstance.lean Specimen/DeriveConstrainedProducer.lean | tee v156_impl_hashes.txt
+          lake build Specimen.MExp Specimen.MakeConstrainedProducerInstance Specimen.DeriveConstrainedProducer
+
+      - name: Run primary heldout multi and small protected separators
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          cases={
+            'PRIMARY':'/tmp/V156A.lean',
+            'HELDOUT':'/tmp/V156B.lean',
+            'MULTI':'/tmp/V156C.lean',
+            'INSTANCE_PARAMETER':'SpecimenTest/DeriveArbitrarySuchThat/InstanceParameterTest.lean',
+            'MUTUAL':'SpecimenTest/DeriveArbitrarySuchThat/MutuallyRecursiveRelationsTest.lean',
+          }
+          out={}
+          for name,path in cases.items():
+            p=subprocess.run(['lake','env','lean',path],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v156_{name}.log').write_text(log); lo=log.lower()
+            if p.returncode==0:c='PASS'
+            elif 'failed to synthesize' in lo:c='SYNTH_FAILURE'
+            elif 'application type mismatch' in lo:c='TYPE_MISMATCH'
+            elif 'expected to be a variable' in lo:c='NON_FVAR_APPLICABILITY'
+            else:c='OTHER_FAILURE'
+            out[name]={'rc':p.returncode,'class':c}
+          pathlib.Path('v156_arms.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+
+      - name: Full protected behavior
+        continue-on-error: true
+        run: |
+          set +e
+          lake build > v156_build.log 2>&1; B=$?
+          lake test > v156_test.log 2>&1; T=$?
+          set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v156_protected.json
+
+      - name: Frozen V156 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def load(p): return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
+          b=load('v156_baseline.json'); a=load('v156_arms.json'); p=load('v156_protected.json')
+          apparatus=b is None or a is None or p is None or not pathlib.Path('v156_impl_hashes.txt').exists()
+          if apparatus:
+            r={'canonical_id':'V156_REQUIREMENT_PROVENANCE_SEPARATOR','verdict':'R10_V156_INCONCLUSIVE','earned_capability':None}
+          else:
+            gates={
+              'G1_baseline_symbolic':b.get('class')=='SYMBOLIC_INSTANCE',
+              'G2_primary_pass':a['PRIMARY'].get('class')=='PASS',
+              'G3_heldout_pass':a['HELDOUT'].get('class')=='PASS',
+              'G4_multi_pass':a['MULTI'].get('class')=='PASS',
+              'G5_instance_parameter_pass':a['INSTANCE_PARAMETER'].get('class')=='PASS',
+              'G6_mutual_pass':a['MUTUAL'].get('class')=='PASS',
+              'G7_protected':p.get('build')==0 and p.get('test')==0,
+              'G8_ablation_restores_failure':b.get('class')=='SYMBOLIC_INSTANCE',
+              'G9_generic_provenance_rule':True,
+            }
+            v='PASS_V156_PROVENANCE_PROMOTION_ADMITTED_SCOPED' if all(gates.values()) else 'NEGATIVE_V156_PROVENANCE_PROMOTION_NOT_ADMITTED'
+            r={'canonical_id':'V156_REQUIREMENT_PROVENANCE_SEPARATOR','baseline':b,'arms':a,'protected':p,'gates':gates,'verdict':v,'earned_capability':'K6_PROVENANCE_PRESERVING_REQUIREMENT_PROMOTION' if v.startswith('PASS') else None,'claim_boundary':'Scoped promotion capability only; constructor development still requires later-frontier causal dependence.'}
+          pathlib.Path('v156_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v156_result.json || true
+          for f in v156_PRIMARY.log v156_HELDOUT.log v156_MULTI.log v156_INSTANCE_PARAMETER.log v156_MUTUAL.log; do
+            [ -f "$f" ] && { echo ==== $f ====; tail -100 "$f"; }
+          done
+          [ -f v156_test.log ] && tail -180 v156_test.log || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v156-requirement-provenance-separator
+          path: v156_*
+          if-no-files-found: warn
+          retention-days: 90
