@@ -1,0 +1,64 @@
+name: V145b let standalone apparatus repair
+on:
+  push:
+    branches: ["v145b-let-standalone-apparatus"]
+  workflow_dispatch:
+jobs:
+  separator:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {lint: false, test: false}
+      - name: Apply exact admitted K2 K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Run standalone arms
+        run: |
+          cat > /tmp/C.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V145BP where Meta : Type
+          def V145BP0 : V145BP := ⟨Unit⟩
+          inductive V145BBox (p : V145BP) : Type where | mk : p.Meta → V145BBox p
+          inductive V145BHas {p : V145BP} : V145BBox p → Prop where | mk (x : p.Meta) : V145BHas (V145BBox.mk x)
+          EOF
+          cp /tmp/C.lean /tmp/SD.lean; echo 'derive_generator (fun (_ : Unit) => ∃ b : V145BBox V145BP0, V145BHas b)' >> /tmp/SD.lean
+          cp /tmp/C.lean /tmp/SL.lean; echo 'derive_generator (let p := V145BP0; fun (_ : Unit) => ∃ b : V145BBox p, V145BHas b)' >> /tmp/SL.lean
+          cp /tmp/C.lean /tmp/SLS.lean; cat >> /tmp/SLS.lean <<'EOF'
+          derive_generator (let p := V145BP0; fun (_ : Unit) => ∃ b : V145BBox p, V145BHas b)
+          #synth ArbitrarySizedSuchThat (V145BBox V145BP0) (fun b => V145BHas b)
+          EOF
+          cp /tmp/C.lean /tmp/SG.lean; echo 'derive_generator (fun (p : V145BP) (_ : Unit) => ∃ b : V145BBox p, V145BHas b)' >> /tmp/SG.lean
+          python - <<'PY'
+          import subprocess,json,pathlib
+          out={}
+          for n in ['SD','SL','SLS','SG']:
+            p=subprocess.run(['lake','env','lean',f'/tmp/{n}.lean'],capture_output=True,text=True); log=p.stdout+p.stderr; pathlib.Path(f'v145b_{n}.log').write_text(log); lo=log.lower()
+            if p.returncode==0:c='PASS'
+            elif 'expected to be a variable' in lo:c='NON_FVAR_APPLICABILITY'
+            elif 'failed to synthesize' in lo and 'arbitrary' in lo and 'meta' in lo:c='SYMBOLIC_INSTANCE'
+            elif 'expected inductive' in lo or 'expected constant' in lo or 'unexpected token' in lo or 'invalid term' in lo:c='R10_APPARATUS'
+            else:c='OTHER_FAILURE'
+            out[n]={'rc':p.returncode,'class':c,'first_error':next((x for x in log.splitlines() if 'error' in x.lower()),'')}
+          pathlib.Path('v145b_arms.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n'); print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+      - name: Protected and verdict
+        run: |
+          set +e; lake build > v145b_build.log 2>&1; B=$?; lake test > v145b_test.log 2>&1; T=$?; set -e
+          python - <<PY
+          import json,pathlib
+          a=json.loads(pathlib.Path('v145b_arms.json').read_text()); c=lambda k:a[k]['class']; protected=($B==0 and $T==0)
+          if c('SL')=='R10_APPARATUS' or c('SLS')=='R10_APPARATUS': v='R10_INCONCLUSIVE_LET_ROUTE_NOT_REACHED'
+          elif c('SL')=='PASS' and c('SLS')=='PASS' and c('SD')=='NON_FVAR_APPLICABILITY' and c('SG')=='SYMBOLIC_INSTANCE' and protected: v='REJECT_K6_LET_BOUND_OLD_CLOSURE_SUFFICES'
+          elif protected: v='LET_ROUTE_REACHED_BUT_DID_NOT_CLOSE'
+          else:v='R10_PROTECTED_FAILURE'
+          r={'canonical_id':'V145B_LET_STANDALONE_APPARATUS','arms':a,'protected':protected,'verdict':v,'claim_boundary':'No K6/construction-development claim.'}; pathlib.Path('v145b_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: v145b-let-standalone-apparatus, path: 'v145b_*'}
