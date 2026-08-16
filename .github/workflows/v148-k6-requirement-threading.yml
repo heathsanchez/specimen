@@ -3,7 +3,9 @@ name: V148 K6 dependent requirement threading
 on:
   push:
     branches: ["v148-k6-requirement-threading"]
-    paths: ['.github/workflows/v148-k6-requirement-threading.yml']
+    paths:
+      - '.github/workflows/v148-k6-requirement-threading.yml'
+      - 'scripts/v148_apply_k6_requirement_threading.py'
   workflow_dispatch:
 
 jobs:
