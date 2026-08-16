@@ -1,0 +1,116 @@
+name: V172 issue19 source-distinct transfer
+on:
+  push:
+    branches: ["v172-issue19-source-distinct-transfer"]
+    paths: ['.github/workflows/v172-issue19-source-distinct-transfer.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: false, test: false, lint: false}
+      - name: Freeze protocol, fixtures, and intervention
+        run: |
+          set -euo pipefail
+          lake --version
+          sha256sum protocols/V172_ISSUE19_SOURCE_DISTINCT_TRANSFER.md \
+            fixtures/V172_MAP_SHAPED_FIXED_PARAMS.lean fixtures/V172_SET_SHAPED_FIXED_PARAM.lean \
+            fixtures/V171_GENERATED_TYPE_SAFETY.lean fixtures/V171_EQUALITY_TYPEPARAM_SAFETY.lean \
+            scripts/v120_apply_binder_aware_fixed_parameter.py scripts/v132_apply_output_dependent_input_determined.py \
+            scripts/v156_apply_requirement_provenance_promotion.py scripts/v156b_apply_checker_consumer_compat.py \
+            scripts/v158_apply_scope_dependent_promotion.py scripts/v168_apply_certified_constructor_irrefutability.py \
+            scripts/v171_apply_delete_default_typeparam_constraints.py | tee v172_hashes.txt
+      - name: Define helpers
+        run: |
+          cat > /tmp/v172.sh <<'SH'
+          set -euo pipefail
+          prior() {
+            python scripts/v120_apply_binder_aware_fixed_parameter.py
+            python scripts/v132_apply_output_dependent_input_determined.py
+            python scripts/v156_apply_requirement_provenance_promotion.py
+            python scripts/v156b_apply_checker_consumer_compat.py
+            python scripts/v158_apply_scope_dependent_promotion.py
+            python scripts/v168_apply_certified_constructor_irrefutability.py
+          }
+          clean() { git checkout HEAD -- Specimen SpecimenTest; rm -rf .lake/build; }
+          corebuild() { lake build Plausible Specimen; }
+          probe() { local f="$1" p="$2"; set +e; lake env lean "$f" > "$p.log" 2>&1; local r=$?; set -e; echo "$r" > "$p.rc"; }
+          SH
+      - name: Arm A admitted prior stack
+        run: |
+          source /tmp/v172.sh
+          clean; prior > v172_A_apply.log 2>&1; corebuild > v172_A_build.log 2>&1
+          probe fixtures/V172_MAP_SHAPED_FIXED_PARAMS.lean v172_A_map
+          probe fixtures/V172_SET_SHAPED_FIXED_PARAM.lean v172_A_set
+      - name: Arm B frozen deletion transfer and protected suite
+        run: |
+          source /tmp/v172.sh
+          clean; prior > v172_B_prior.log 2>&1
+          python scripts/v171_apply_delete_default_typeparam_constraints.py | tee v172_B_delete.log
+          grep -q V171_DEFAULT_TYPEPARAM_CONSTRAINTS_DELETED_ALL_EMITTERS v172_B_delete.log
+          set +e
+          lake build > v172_B_fullbuild.log 2>&1; echo $? > v172_B_fullbuild.rc
+          lake test > v172_B_test.log 2>&1; echo $? > v172_B_test.rc
+          set -e
+          probe fixtures/V172_MAP_SHAPED_FIXED_PARAMS.lean v172_B_map
+          probe fixtures/V172_SET_SHAPED_FIXED_PARAM.lean v172_B_set
+          probe fixtures/V171_GENERATED_TYPE_SAFETY.lean v172_B_generated
+          probe fixtures/V171_EQUALITY_TYPEPARAM_SAFETY.lean v172_B_equality
+      - name: Arm C independent ablation
+        run: |
+          source /tmp/v172.sh
+          clean; prior > v172_C_apply.log 2>&1; corebuild > v172_C_build.log 2>&1
+          probe fixtures/V172_MAP_SHAPED_FIXED_PARAMS.lean v172_C_map
+          probe fixtures/V172_SET_SHAPED_FIXED_PARAM.lean v172_C_set
+      - name: Frozen V172 classification
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def arm(p):
+            rp=pathlib.Path(p+'.rc'); lp=pathlib.Path(p+'.log')
+            rc=int(rp.read_text().strip()) if rp.exists() else None
+            log=lp.read_text(errors='replace') if lp.exists() else ''
+            return {'rc':rc,'failed_synth':'failed to synthesize' in log.lower(),'tail':log[-1800:]}
+          def rcfile(p):
+            q=pathlib.Path(p)
+            return int(q.read_text().strip()) if q.exists() else None
+          A={'map':arm('v172_A_map'),'set':arm('v172_A_set')}
+          B={'map':arm('v172_B_map'),'set':arm('v172_B_set'),'generated':arm('v172_B_generated'),'equality':arm('v172_B_equality')}
+          C={'map':arm('v172_C_map'),'set':arm('v172_C_set')}
+          fullbuild=rcfile('v172_B_fullbuild.rc'); test=rcfile('v172_B_test.rc')
+          required=['v172_A_build.log','v172_B_delete.log','v172_B_fullbuild.rc','v172_B_test.rc','v172_C_build.log']
+          apparatus=not all(pathlib.Path(x).exists() for x in required)
+          gates={
+            'A_map_specific_failure':A['map']['rc'] not in (None,0) and A['map']['failed_synth'],
+            'A_set_specific_failure':A['set']['rc'] not in (None,0) and A['set']['failed_synth'],
+            'B_map_transfer':B['map']['rc']==0,
+            'B_set_transfer':B['set']['rc']==0,
+            'B_generated_safety':B['generated']['rc']==0,
+            'B_equality_safety':B['equality']['rc']==0,
+            'B_full_build':fullbuild==0,
+            'B_full_test':test==0,
+            'C_map_restores':C['map']['rc'] not in (None,0) and C['map']['failed_synth'],
+            'C_set_restores':C['set']['rc'] not in (None,0) and C['set']['failed_synth'],
+          }
+          if apparatus: verdict='R10_V172_INCONCLUSIVE'
+          elif all(gates.values()): verdict='PASS_V172_DELETION_TRANSFERS_SOURCE_DISTINCT_AND_PROTECTED'
+          elif B['map']['rc']==0 and B['set']['rc']==0 and (fullbuild!=0 or test!=0 or B['generated']['rc']!=0 or B['equality']['rc']!=0): verdict='KILL_V172_TRANSFER_WITH_PROTECTED_REGRESSION'
+          else: verdict='NEGATIVE_V172_TRANSFER_NOT_ESTABLISHED'
+          out={'canonical_id':'V172_ISSUE19_SOURCE_DISTINCT_TRANSFER','apparatus':apparatus,'gates':gates,'protected':{'fullbuild_rc':fullbuild,'test_rc':test},'A':A,'B':B,'C':C,'verdict':verdict}
+          pathlib.Path('v172_result.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v172_result.json || true
+          tail -80 v172_B_fullbuild.log 2>/dev/null || true
+          tail -80 v172_B_test.log 2>/dev/null || true
+          for f in v172_*_map.log v172_*_set.log v172_B_generated.log v172_B_equality.log; do echo ===$f===; tail -60 "$f" 2>/dev/null || true; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: v172-issue19-source-distinct-transfer, path: 'v172*', retention-days: 90}
