@@ -1,0 +1,109 @@
+name: V160 requirement set decomposition
+
+on:
+  push:
+    branches: ["v160-requirement-set-decomposition"]
+    paths:
+      - '.github/workflows/v160-requirement-set-decomposition.yml'
+      - 'experiments/V160_REQUIREMENT_SET_DECOMPOSITION_PREREG.md'
+  workflow_dispatch:
+
+jobs:
+  decompose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply K2 K5 and exact V156
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          python scripts/v156_apply_requirement_aware_deriver.py
+          lake build Specimen.MakeConstrainedProducerInstance Specimen.DeriveConstrainedProducer
+      - name: Freeze L1 L2 D1 fixtures
+        run: |
+          cat > /tmp/V160L1.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V160P1 where A : Type
+          inductive V160Box1 (p : V160P1) where | mk : p.A → V160Box1 p
+          inductive V160Has1 (p : V160P1) : V160Box1 p → Prop where | mk (a : p.A) : V160Has1 p (.mk a)
+          derive_generator_with_requirements (fun (p : V160P1) => ∃ b : V160Box1 p, V160Has1 p b)
+          EOF
+          cat > /tmp/V160L2.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V160P2 where A : Type; B : Type
+          inductive V160Box2 (p : V160P2) where | mk : p.A → p.B → V160Box2 p
+          inductive V160Has2 (p : V160P2) : V160Box2 p → Prop where | mk (a : p.A) (b : p.B) : V160Has2 p (.mk a b)
+          derive_generator_with_requirements (fun (p : V160P2) => ∃ b : V160Box2 p, V160Has2 p b)
+          EOF
+          cat > /tmp/V160D1.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V160PD where A : Type
+          inductive V160Need : Nat → Prop where | zero : V160Need 0
+          inductive V160BoxD (p : V160PD) where | mk : p.A → Nat → V160BoxD p
+          inductive V160HasD (p : V160PD) : V160BoxD p → Prop where
+            | mk (a : p.A) (n : Nat) : V160Need n → V160HasD p (.mk a n)
+          derive_generator_with_requirements (fun (p : V160PD) => ∃ b : V160BoxD p, V160HasD p b)
+          EOF
+      - name: Execute frozen decomposition
+        run: |
+          python - <<'PY'
+          import json,pathlib,re,subprocess
+          out={}
+          for name in ['L1','L2','D1']:
+            p=subprocess.run(['lake','env','lean',f'/tmp/V160{name}.lean'],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v160_{name}.log').write_text(log); lo=log.lower()
+            m=re.search(r'discovered\s+(\d+)',lo)
+            if p.returncode==0:c='PASS'
+            elif 'requirement-aware deriver currently supports' in lo:c='ARITY_FAILURE'
+            elif 'failed to synthesize' in lo:c='SYNTH_FAILURE'
+            elif 'unable to derive producer schedule' in lo or 'cannot derive constrained producer' in lo:c='SCHEDULE_FAILURE'
+            else:c='OTHER_FAILURE'
+            out[name]={'rc':p.returncode,'class':c,'discovered_count':None if m is None else int(m.group(1)),'tail':log[-12000:]}
+          pathlib.Path('v160_arms.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Protected suite
+        continue-on-error: true
+        run: |
+          set +e; lake build > v160_build.log 2>&1; B=$?; lake test > v160_test.log 2>&1; T=$?; set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v160_protected.json
+          exit 0
+      - name: Frozen V160 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def load(p): return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
+          a=load('v160_arms.json'); p=load('v160_protected.json')
+          if a is None or p is None:v='R10_INCONCLUSIVE'
+          elif p.get('build')!=0 or p.get('test')!=0:v='R10_PROTECTED_FAILURE'
+          else:
+            l1=a['L1']; l2=a['L2']; d1=a['D1']
+            if l1['class']=='PASS' and l2['class']=='ARITY_FAILURE' and l2['discovered_count']==2 and (d1['discovered_count'] != 2 or d1['class'] != 'ARITY_FAILURE'):
+              v='PASS_V160_PURE_LEAF_MULTIPLICITY_ISOLATED'
+            elif l1['class']=='PASS' and l2['class']=='ARITY_FAILURE' and l2['discovered_count']==2:
+              v='V160_LEAF_MULTIPLICITY_ISOLATED_BUT_D1_NOT_SEPARATED'
+            else:v='V160_LEAF_MULTIPLICITY_NOT_ISOLATED'
+          r={'canonical_id':'V160_REQUIREMENT_SET_DECOMPOSITION','arms':a,'protected':p,'verdict':v,'claim_boundary':'Mechanism decomposition only; no multi-requirement operator admitted.'}
+          pathlib.Path('v160_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v160_result.json || true
+          for f in v160_L1.log v160_L2.log v160_D1.log; do [ -f "$f" ] && { echo ==== $f ====; cat "$f"; }; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v160-requirement-set-decomposition
+          path: v160_*
