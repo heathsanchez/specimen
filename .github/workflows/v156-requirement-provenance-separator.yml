@@ -67,7 +67,9 @@ jobs:
             SpecimenTest/DeriveArbitrarySuchThat/MutuallyRecursiveRelationsTest.lean | tee v156_fixture_hashes.txt
           sha256sum protocols/V156_REQUIREMENT_PROVENANCE_SEPARATOR_PRECOMMIT.md \
             protocols/V156A_ANCHOR_AND_PIPEFAIL_APPARATUS_ADDENDUM.md \
-            scripts/v156_apply_requirement_provenance_promotion.py | tee v156_protocol_hashes.txt
+            protocols/V156B_CHECKER_CONSUMER_COMPATIBILITY_ADDENDUM.md \
+            scripts/v156_apply_requirement_provenance_promotion.py \
+            scripts/v156b_apply_checker_consumer_compat.py | tee v156_protocol_hashes.txt
 
       - name: Baseline and ablation record
         run: |
@@ -83,19 +85,24 @@ jobs:
           pathlib.Path('v156_baseline.json').write_text(json.dumps(r,indent=2)+'\n'); print(json.dumps(r,indent=2))
           PY
 
-      - name: Apply frozen V156 intervention
+      - name: Apply frozen V156 intervention and V156B representation adapter
         run: |
           set -o pipefail
           python scripts/v156_apply_requirement_provenance_promotion.py | tee v156_apply.log
+          python scripts/v156b_apply_checker_consumer_compat.py | tee v156b_adapter.log
           grep -q 'REQUIREMENT_PROVENANCE_PROMOTION_APPLIED' v156_apply.log
+          grep -q 'V156B_CHECKER_CONSUMER_COMPAT_APPLIED' v156b_adapter.log
           grep -q 'origin := .unconstrained' Specimen/MExp.lean
           grep -q 'origin := .constrained' Specimen/MExp.lean
           grep -q 'k6_required_outer_' Specimen/MakeConstrainedProducerInstance.lean
           grep -q 'k6_required_inner_' Specimen/MakeConstrainedProducerInstance.lean
           grep -q 'req.origin == .unconstrained' Specimen/DeriveConstrainedProducer.lean
-          sha256sum scripts/v156_apply_requirement_provenance_promotion.py Specimen/MExp.lean \
-            Specimen/MakeConstrainedProducerInstance.lean Specimen/DeriveConstrainedProducer.lean | tee v156_impl_hashes.txt
-          lake build Specimen.MExp Specimen.MakeConstrainedProducerInstance Specimen.DeriveConstrainedProducer
+          grep -q 'requiredInstances.toList.map (·.term)' Specimen/DeriveChecker.lean
+          sha256sum scripts/v156_apply_requirement_provenance_promotion.py \
+            scripts/v156b_apply_checker_consumer_compat.py Specimen/MExp.lean \
+            Specimen/MakeConstrainedProducerInstance.lean Specimen/DeriveConstrainedProducer.lean \
+            Specimen/DeriveChecker.lean | tee v156_impl_hashes.txt
+          lake build Specimen.MExp Specimen.MakeConstrainedProducerInstance Specimen.DeriveConstrainedProducer Specimen.DeriveChecker
 
       - name: Run primary heldout multi and small protected separators
         run: |
@@ -138,7 +145,8 @@ jobs:
           def load(p): return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
           b=load('v156_baseline.json'); a=load('v156_arms.json'); p=load('v156_protected.json')
           applied=pathlib.Path('v156_apply.log').exists() and 'REQUIREMENT_PROVENANCE_PROMOTION_APPLIED' in pathlib.Path('v156_apply.log').read_text()
-          apparatus=b is None or a is None or p is None or not pathlib.Path('v156_impl_hashes.txt').exists() or not applied
+          adapted=pathlib.Path('v156b_adapter.log').exists() and 'V156B_CHECKER_CONSUMER_COMPAT_APPLIED' in pathlib.Path('v156b_adapter.log').read_text()
+          apparatus=b is None or a is None or p is None or not pathlib.Path('v156_impl_hashes.txt').exists() or not applied or not adapted
           if apparatus:
             r={'canonical_id':'V156_REQUIREMENT_PROVENANCE_SEPARATOR','verdict':'R10_V156_INCONCLUSIVE','earned_capability':None}
           else:
@@ -163,6 +171,7 @@ jobs:
         run: |
           cat v156_result.json || true
           [ -f v156_apply.log ] && cat v156_apply.log || true
+          [ -f v156b_adapter.log ] && cat v156b_adapter.log || true
           for f in v156_PRIMARY.log v156_HELDOUT.log v156_MULTI.log v156_INSTANCE_PARAMETER.log v156_MUTUAL.log; do
             [ -f "$f" ] && { echo ==== $f ====; tail -100 "$f"; }
           done
@@ -171,7 +180,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: v156a-requirement-provenance-separator
+          name: v156b-requirement-provenance-separator
           path: v156_*
           if-no-files-found: warn
           retention-days: 90
