@@ -18,7 +18,7 @@ new = '''      if ident.isFVar then ident.fvarId!.getUserName
         -- V147b K6_GLOBAL_FIXED_INPUT: preserve an actual global constant by
         -- its global name.  The emitter recognizes that name as global and
         -- deliberately does not quantify it as a producer parameter.
-        ident.constName!
+        pure ident.constName!
       else if let some outIdx := outputIdxs.findIdx? (· == i) then
         outputVars[outIdx]!.fvarId!.getUserName
       else throwError m!"{ident} is expected to be a variable.")'''
