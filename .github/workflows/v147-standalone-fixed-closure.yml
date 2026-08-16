@@ -1,0 +1,98 @@
+name: V147 standalone fixed old-closure separator
+
+on:
+  push:
+    branches: ["v147-standalone-fixed-closure"]
+    paths: ['.github/workflows/v147-standalone-fixed-closure.yml']
+  workflow_dispatch:
+
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact admitted K2 K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Materialize arms
+        run: |
+          cat > /tmp/V147Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V147P where Meta : Type
+          def V147P0 : V147P := ⟨Unit⟩
+          inductive V147Box (p : V147P) : Type where | mk : p.Meta → V147Box p
+          inductive V147Has {p : V147P} : V147Box p → Prop where | mk (x : p.Meta) : V147Has (V147Box.mk x)
+          EOF
+          cp /tmp/V147Common.lean /tmp/M.lean; cat >> /tmp/M.lean <<'EOF'
+          derive_mutual (fun (_ : Unit) => ∃ b : V147Box V147P0, V147Has b)
+          EOF
+          cp /tmp/V147Common.lean /tmp/S.lean; cat >> /tmp/S.lean <<'EOF'
+          derive_generator (fun (_ : Unit) => ∃ b : V147Box V147P0, V147Has b)
+          EOF
+          cp /tmp/V147Common.lean /tmp/SS.lean; cat >> /tmp/SS.lean <<'EOF'
+          derive_generator (fun (_ : Unit) => ∃ b : V147Box V147P0, V147Has b)
+          #synth ArbitrarySizedSuchThat (V147Box V147P0) (fun b => V147Has b)
+          EOF
+          cp /tmp/V147Common.lean /tmp/SA.lean; cat >> /tmp/SA.lean <<'EOF'
+          abbrev V147Box0 := V147Box V147P0
+          derive_generator (fun (_ : Unit) => ∃ b : V147Box0, V147Has b)
+          #synth ArbitrarySizedSuchThat V147Box0 (fun b => V147Has b)
+          EOF
+          cp /tmp/V147Common.lean /tmp/SG.lean; cat >> /tmp/SG.lean <<'EOF'
+          derive_generator (fun (p : V147P) => ∃ b : V147Box p, V147Has b)
+          EOF
+      - name: Execute arms
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          arms={'MUTUAL_DIRECT':'M','STANDALONE_DIRECT':'S','STANDALONE_DIRECT_SYNTH':'SS','STANDALONE_ABBREV_SYNTH':'SA','STANDALONE_GENERIC':'SG'}
+          out={}
+          for name,stem in arms.items():
+            p=subprocess.run(['lake','env','lean',f'/tmp/{stem}.lean'],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v147_{stem}.log').write_text(log); lo=log.lower()
+            if p.returncode==0: c='PASS'
+            elif 'expected to be a variable' in lo: c='NON_FVAR_APPLICABILITY'
+            elif 'failed to synthesize' in lo and 'meta' in lo: c='SYMBOLIC_INSTANCE'
+            elif 'unexpected token' in lo or 'unknown parser' in lo or 'unexpected syntax' in lo: c='R10_APPARATUS'
+            else: c='OTHER_FAILURE'
+            out[name]={'rc':p.returncode,'class':c,'first_error':next((x for x in log.splitlines() if 'error' in x.lower()),'')}
+          pathlib.Path('v147_arms.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Protected suite
+        run: |
+          set +e; lake build > v147_build.log 2>&1; B=$?; lake test > v147_test.log 2>&1; T=$?; set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v147_protected.json
+          [ "$B" -eq 0 ] && [ "$T" -eq 0 ]
+      - name: Frozen verdict
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          a=json.load(open('v147_arms.json')); p=json.load(open('v147_protected.json')); c=lambda k:a[k]['class']
+          g={'C1_mutual_control':c('MUTUAL_DIRECT')=='NON_FVAR_APPLICABILITY','C2_standalone_derives':c('STANDALONE_DIRECT')=='PASS','C3_standalone_fixed_synth':c('STANDALONE_DIRECT_SYNTH')=='PASS','C4_standalone_abbrev_synth':c('STANDALONE_ABBREV_SYNTH')=='PASS','C5_protected':p['build']==0 and p['test']==0}
+          apparatus=any(c(k)=='R10_APPARATUS' for k in a)
+          if apparatus: v='R10_INCONCLUSIVE'
+          elif all(g.values()): v='REJECT_BROAD_K6_STANDALONE_OLD_CLOSURE_SUFFICES'
+          elif g['C1_mutual_control'] and g['C5_protected']: v='K6_REMAINS_LICENSED_AFTER_STANDALONE_SEPARATOR'
+          else: v='INCONCLUSIVE_CONTROL_FAILURE'
+          r={'canonical_id':'V147_STANDALONE_FIXED_CLOSURE','arms':a,'gates':g,'protected':p,'verdict':v,'claim_boundary':'Old closure only; no K6 or constructor-development claim.'}
+          pathlib.Path('v147_result.json').write_text(json.dumps(r,indent=2)+'\n'); print(json.dumps(r,indent=2))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          for f in v147_*.log; do echo ==== $f ====; cat "$f"; done
+          cat v147_result.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v147-standalone-fixed-closure
+          path: v147_*
