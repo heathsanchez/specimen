@@ -1,0 +1,106 @@
+name: V151A dependent-premise rebinding apparatus repair
+
+on:
+  push:
+    branches: ["v151a-dependent-premise-rebinding-apparatus-repair"]
+    paths:
+      - '.github/workflows/v151a-dependent-premise-rebinding-apparatus-repair.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          build: default
+          test: false
+          lint: false
+
+      - name: Freeze V151A provenance and corrected fixtures before outcome
+        run: |
+          sha256sum protocols/V151_DEPENDENT_PREMISE_REBINDING_SEPARATOR_PRECOMMIT.md protocols/V151A_REBINDING_SEPARATOR_APPARATUS_ADDENDUM.md
+          cat > /tmp/V151A_A_BASE.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          structure V151AP where Meta : Type
+          def V151AP0 : V151AP := ⟨Unit⟩
+          inductive V151ABox (p : V151AP) : Type where | mk : p.Meta → V151ABox p
+          inductive V151AHas {p : V151AP} : V151ABox p → Prop where | mk (x : p.Meta) : V151AHas (V151ABox.mk x)
+          instance {p : V151AP} : ArbitrarySizedSuchThat (V151ABox p) (fun b => V151AHas b) where
+            arbitrarySizedST := fun _ => do
+              let x : p.Meta ← Plausible.Arbitrary.arbitrary
+              return V151ABox.mk x
+          EOF
+          cat > /tmp/V151A_A_REBOUND.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          structure V151AP where Meta : Type
+          def V151AP0 : V151AP := ⟨Unit⟩
+          inductive V151ABox (p : V151AP) : Type where | mk : p.Meta → V151ABox p
+          inductive V151AHas {p : V151AP} : V151ABox p → Prop where | mk (x : p.Meta) : V151AHas (V151ABox.mk x)
+          instance {p : V151AP} [Plausible.Arbitrary p.Meta] : ArbitrarySizedSuchThat (V151ABox p) (fun b => V151AHas b) where
+            arbitrarySizedST := fun _ => do
+              let x : p.Meta ← Plausible.Arbitrary.arbitrary
+              return V151ABox.mk x
+          #synth ArbitrarySizedSuchThat (V151ABox V151AP0) (fun b => V151AHas b)
+          EOF
+          cat > /tmp/V151A_B_BASE.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          structure V151AQ where Carrier : Type
+          def V151AQ0 : V151AQ := ⟨Bool⟩
+          inductive V151APacket (q : V151AQ) : Type where | pack : q.Carrier → V151APacket q
+          inductive V151AAccepts {q : V151AQ} : V151APacket q → Prop where | accept (x : q.Carrier) : V151AAccepts (V151APacket.pack x)
+          instance {q : V151AQ} : ArbitrarySizedSuchThat (V151APacket q) (fun p => V151AAccepts p) where
+            arbitrarySizedST := fun _ => do
+              let x : q.Carrier ← Plausible.Arbitrary.arbitrary
+              return V151APacket.pack x
+          EOF
+          cat > /tmp/V151A_B_REBOUND.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          structure V151AQ where Carrier : Type
+          def V151AQ0 : V151AQ := ⟨Bool⟩
+          inductive V151APacket (q : V151AQ) : Type where | pack : q.Carrier → V151APacket q
+          inductive V151AAccepts {q : V151AQ} : V151APacket q → Prop where | accept (x : q.Carrier) : V151AAccepts (V151APacket.pack x)
+          instance {q : V151AQ} [Plausible.Arbitrary q.Carrier] : ArbitrarySizedSuchThat (V151APacket q) (fun p => V151AAccepts p) where
+            arbitrarySizedST := fun _ => do
+              let x : q.Carrier ← Plausible.Arbitrary.arbitrary
+              return V151APacket.pack x
+          #synth ArbitrarySizedSuchThat (V151APacket V151AQ0) (fun p => V151AAccepts p)
+          EOF
+          sha256sum /tmp/V151A_*.lean | tee v151a_fixture_hashes.txt
+
+      - name: Run frozen V151A separator
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          files={'BASE_A':'/tmp/V151A_A_BASE.lean','REBOUND_A':'/tmp/V151A_A_REBOUND.lean','BASE_B':'/tmp/V151A_B_BASE.lean','REBOUND_B':'/tmp/V151A_B_REBOUND.lean'}
+          out={}
+          for name,path in files.items():
+            p=subprocess.run(['lake','env','lean',path],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v151a_{name}.log').write_text(log); lo=log.lower()
+            out[name]={'rc':p.returncode,'missing_dependent_arbitrary':'failed to synthesize' in lo and ('meta' in lo or 'carrier' in lo),'first_error':next((x for x in log.splitlines() if 'error' in x.lower()),'')}
+          gates={'G1_base_A_missing':out['BASE_A']['rc']!=0 and out['BASE_A']['missing_dependent_arbitrary'],'G2_rebound_A_pass':out['REBOUND_A']['rc']==0,'G3_base_B_missing':out['BASE_B']['rc']!=0 and out['BASE_B']['missing_dependent_arbitrary'],'G4_rebound_B_pass':out['REBOUND_B']['rc']==0}
+          verdict='PASS_V151A_REBINDING_RIVAL_CONFIRMED' if all(gates.values()) else 'NEGATIVE_V151A_REBINDING_RIVAL_NOT_CONFIRMED'
+          r={'canonical_id':'V151A_DEPENDENT_PREMISE_REBINDING_SEPARATOR','arms':out,'gates':gates,'verdict':verdict,'claim_boundary':'Mechanism separator only; cannot earn K6.'}
+          pathlib.Path('v151a_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+
+      - name: Protected baseline sanity
+        run: |
+          lake build
+          lake test
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v151a-dependent-premise-rebinding
+          path: v151a_*
+          if-no-files-found: warn
