@@ -1,0 +1,140 @@
+name: V139 fixed-index applicability discriminator
+
+on:
+  push:
+    branches: ["v139-fixed-index-applicability-discriminator"]
+  workflow_dispatch:
+
+jobs:
+  discriminator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+
+      - name: Apply exact admitted K2 and K5 unchanged
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+
+      - name: Freeze V139 matched fixtures
+        run: |
+          cat > /tmp/V139Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+
+          structure V139P where
+            Meta : Type
+
+          def V139P0 : V139P := ⟨Unit⟩
+
+          inductive V139Box (p : V139P) : Type where
+          | mk : p.Meta → V139Box p
+
+          inductive V139Has {p : V139P} : V139Box p → Prop where
+          | mk (x : p.Meta) : V139Has (V139Box.mk x)
+          EOF
+
+          cp /tmp/V139Common.lean /tmp/V139Generic.lean
+          cat >> /tmp/V139Generic.lean <<'EOF'
+
+          derive_mutual (fun (p : V139P) => ∃ b : V139Box p, V139Has b)
+          EOF
+
+          cp /tmp/V139Common.lean /tmp/V139Direct.lean
+          cat >> /tmp/V139Direct.lean <<'EOF'
+
+          derive_mutual (fun (_ : Unit) => ∃ b : V139Box V139P0, V139Has b)
+          EOF
+
+          cp /tmp/V139Common.lean /tmp/V139Abbrev.lean
+          cat >> /tmp/V139Abbrev.lean <<'EOF'
+
+          abbrev V139Box0 := V139Box V139P0
+          derive_mutual (fun (_ : Unit) => ∃ b : V139Box0, V139Has b)
+          EOF
+
+          cp /tmp/V139Common.lean /tmp/V139Wrapper.lean
+          cat >> /tmp/V139Wrapper.lean <<'EOF'
+
+          inductive V139Wrapper : Type where
+          | mk : V139Box V139P0 → V139Wrapper
+
+          inductive V139WrapperHas : V139Wrapper → Prop where
+          | mk (x : V139P0.Meta) : V139WrapperHas (V139Wrapper.mk (V139Box.mk x))
+
+          derive_mutual (fun (_ : Unit) => ∃ w : V139Wrapper, V139WrapperHas w)
+          EOF
+
+      - name: Execute frozen arms and classify
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, pathlib, subprocess
+          arms={
+            'GENERIC_VAR':'/tmp/V139Generic.lean',
+            'DIRECT_CONST':'/tmp/V139Direct.lean',
+            'ABBREV_CONST':'/tmp/V139Abbrev.lean',
+            'WRAPPER_CONST':'/tmp/V139Wrapper.lean',
+          }
+          rows={}
+          for name,path in arms.items():
+              p=subprocess.run(['lake','env','lean',path],capture_output=True,text=True)
+              log=p.stdout+p.stderr
+              pathlib.Path(f'v139_{name.lower()}.log').write_text(log)
+              low=log.lower()
+              if p.returncode == 0:
+                  cls='PASS'
+              elif 'expected to be a variable' in low:
+                  cls='NON_FVAR_APPLICABILITY'
+              elif (('arbitrary' in low or 'synth' in low or 'instance' in low) and 'meta' in low):
+                  cls='SYMBOLIC_INSTANCE'
+              else:
+                  cls='OTHER_FAILURE'
+              rows[name]={'rc':p.returncode,'class':cls,'first_diagnostic':next((x for x in log.splitlines() if 'error' in x.lower()),'')}
+          gates={
+            'A1_k2_k5_module_build':True,
+            'A2_generic_reaches_symbolic_instance':rows['GENERIC_VAR']['class']=='SYMBOLIC_INSTANCE',
+            'A3_direct_constant_non_fvar':rows['DIRECT_CONST']['class']=='NON_FVAR_APPLICABILITY',
+            'A5_no_k6_or_target_specific_repair':True,
+          }
+          if not gates['A2_generic_reaches_symbolic_instance']:
+              verdict='INVALID_V139_GENERIC_CONTROL'
+          elif rows['DIRECT_CONST']['class']=='SYMBOLIC_INSTANCE':
+              verdict='NULL_V139_DIRECT_CONSTANT_REACHES_INSTANCE_SYNTHESIS'
+          elif all(gates.values()):
+              verdict='PASS_V139_FIXED_INDEX_APPLICABILITY_BARRIER'
+          else:
+              verdict='INCONCLUSIVE_V139'
+          out={
+            'canonical_id':'V139_FIXED_INDEX_APPLICABILITY_DISCRIMINATOR',
+            'protocol':'research/V139_FIXED_INDEX_APPLICABILITY_PRECOMMIT.md',
+            'arms':rows,
+            'gates':gates,
+            'verdict':verdict,
+            'successor_license': verdict=='PASS_V139_FIXED_INDEX_APPLICABILITY_BARRIER',
+            'claim_boundary':'Applicability/representation separator only. No K6 is admitted and no constructor-growth claim is made.'
+          }
+          pathlib.Path('v139_result.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+
+      - name: Show diagnostics
+        if: always()
+        run: |
+          for f in v139_*.log; do echo "===== $f ====="; cat "$f"; done
+          cat v139_result.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v139-fixed-index-applicability-discriminator
+          path: |
+            v139_result.json
+            v139_*.log
