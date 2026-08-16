@@ -1,0 +1,79 @@
+name: V154 protected requirement-set diagnostic
+
+on:
+  push:
+    branches: ["v154-protected-requirement-set-diagnostic"]
+    paths:
+      - '.github/workflows/v154-protected-requirement-set-diagnostic.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: default, test: false, lint: false}
+      - name: Apply exact admitted K2 K5 and diagnostic-only logger
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          python scripts/v154_apply_requirement_diagnostic.py
+          sha256sum protocols/V154_PROTECTED_REQUIREMENT_SET_DIAGNOSTIC_PRECOMMIT.md scripts/v154_apply_requirement_diagnostic.py Specimen/DeriveConstrainedProducer.lean | tee v154_hashes.txt
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Run frozen protected diagnostic files
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          files=[
+            'SpecimenTest/DeriveArbitrarySuchThat/InstanceParameterTest.lean',
+            'SpecimenTest/DeriveArbitrarySuchThat/DependentArgs.lean',
+            'SpecimenTest/CedarExample/CedarCheckerGenerators.lean',
+          ]
+          rows=[]
+          for f in files:
+            pth=pathlib.Path(f)
+            if not pth.exists():
+              rows.append({'file':f,'status':'ABSENT'})
+              continue
+            p=subprocess.run(['lake','env','lean',f],capture_output=True,text=True)
+            log=p.stdout+p.stderr
+            pathlib.Path('v154_'+pth.stem+'.log').write_text(log)
+            lines=[x for x in log.splitlines() if 'V154_REQUIRED_INSTANCES' in x]
+            rows.append({'file':f,'status':'PASS' if p.returncode==0 else 'FAIL','rc':p.returncode,'requirement_lines':lines})
+          pathlib.Path('v154_rows.json').write_text(json.dumps(rows,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(rows,indent=2,sort_keys=True))
+          PY
+      - name: Full protected sanity under diagnostic-only change
+        continue-on-error: true
+        run: |
+          set +e
+          lake build > v154_build.log 2>&1; B=$?
+          lake test > v154_test.log 2>&1; T=$?
+          set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v154_protected.json
+      - name: Classify V154
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib,re
+          rows=json.loads(pathlib.Path('v154_rows.json').read_text()) if pathlib.Path('v154_rows.json').exists() else []
+          prot=json.loads(pathlib.Path('v154_protected.json').read_text()) if pathlib.Path('v154_protected.json').exists() else None
+          counts=[]; placeholders=False
+          for r in rows:
+            for line in r.get('requirement_lines',[]):
+              m=re.search(r'count=(\d+)',line)
+              if m: counts.append(int(m.group(1)))
+              if '_' in line: placeholders=True
+          r={'canonical_id':'V154_PROTECTED_REQUIREMENT_SET_DIAGNOSTIC','rows':rows,'protected':prot,'observed_counts':counts,'multi_observed':any(x>1 for x in counts),'placeholder_like_text_observed':placeholders,'verdict':'PASS_V154_DIAGNOSTIC_VALID' if prot and prot.get('build')==0 and prot.get('test')==0 else 'R10_V154_DIAGNOSTIC_CHANGED_PROTECTED_BEHAVIOR','claim_boundary':'Diagnostic only; no K6 earned.'}
+          pathlib.Path('v154_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v154-protected-requirement-diagnostic
+          path: v154_*
+          if-no-files-found: warn
+          retention-days: 90
