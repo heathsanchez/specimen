@@ -1,0 +1,77 @@
+name: V170 issue19 natural baseline qualification
+on:
+  push:
+    branches: ["v170-issue19-natural-baseline-qualification"]
+    paths: ['.github/workflows/v170-issue19-natural-baseline-qualification.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: default, test: false, lint: false}
+      - name: Freeze protocol fixture and prior mechanisms
+        run: |
+          set -euo pipefail
+          sha256sum \
+            protocols/V170_ISSUE19_NATURAL_BASELINE_QUALIFICATION.md \
+            fixtures/V170_ISSUE19_PARAMETER_OVERCONSTRAINT.lean \
+            scripts/v120_apply_binder_aware_fixed_parameter.py \
+            scripts/v132_apply_output_dependent_input_determined.py \
+            scripts/v156_apply_requirement_provenance_promotion.py \
+            scripts/v156b_apply_checker_consumer_compat.py \
+            scripts/v158_apply_scope_dependent_promotion.py \
+            scripts/v168_apply_certified_constructor_irrefutability.py | tee v170_hashes.txt
+      - name: Apply exact admitted prior production stack
+        run: |
+          set -euo pipefail
+          git checkout HEAD -- Specimen SpecimenTest
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          python scripts/v156_apply_requirement_provenance_promotion.py | tee v170_v156.log
+          python scripts/v156b_apply_checker_consumer_compat.py | tee v170_v156b.log
+          python scripts/v158_apply_scope_dependent_promotion.py | tee v170_v158.log
+          python scripts/v168_apply_certified_constructor_irrefutability.py | tee v170_k7s.log
+          grep -q REQUIREMENT_PROVENANCE_PROMOTION_APPLIED v170_v156.log
+          grep -q V156B_CHECKER_CONSUMER_COMPAT_APPLIED v170_v156b.log
+          grep -q SCOPE_DEPENDENT_REQUIREMENT_PROMOTION_APPLIED v170_v158.log
+          grep -q K7S_CERTIFIED_CONSTRUCTOR_IRREFUTABILITY_APPLIED v170_k7s.log
+          rm -rf .lake/build
+          lake build Plausible Specimen > v170_build.log 2>&1
+      - name: Execute frozen issue19 fixture
+        run: |
+          set +e
+          lake env lean fixtures/V170_ISSUE19_PARAMETER_OVERCONSTRAINT.lean > v170.log 2>&1
+          RC=$?
+          set -e
+          echo "$RC" > v170_rc.txt
+      - name: Frozen V170 classification
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          rc=int(pathlib.Path('v170_rc.txt').read_text().strip()) if pathlib.Path('v170_rc.txt').exists() else None
+          log=pathlib.Path('v170.log').read_text(errors='replace') if pathlib.Path('v170.log').exists() else ''
+          lo=log.lower()
+          applied=all(pathlib.Path(x).exists() for x in ['v170_v156.log','v170_v156b.log','v170_v158.log','v170_k7s.log','v170_build.log'])
+          apparatus=(rc is None or not applied or any(x in lo for x in ['unknown module prefix','object file']))
+          generic_derived=('Try this generator:' in log or 'try this generator:' in lo)
+          asks_fixed=('v170fixed' in lo and ('plausible.arbitrary' in lo or 'decidableeq' in lo) and 'failed to synthesize' in lo)
+          if apparatus: verdict='R10_V170_INCONCLUSIVE'
+          elif rc==0: verdict='NULL_V170_ISSUE19_ALREADY_SOLVED'
+          elif asks_fixed: verdict='PASS_V170_ISSUE19_NATURAL_FRONTIER_QUALIFIED'
+          else: verdict='INCONCLUSIVE_V170_DIFFERENT_SEMANTIC_RESIDUAL'
+          out={'canonical_id':'V170_ISSUE19_NATURAL_BASELINE_QUALIFICATION','rc':rc,'apparatus':apparatus,'generic_derivation_visible':generic_derived,'fixed_type_overconstraint':asks_fixed,'verdict':verdict,'log_tail':log[-7000:]}
+          pathlib.Path('v170_result.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v170_result.json || true
+          tail -180 v170.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: v170-issue19-natural-baseline-qualification, path: 'v170*', retention-days: 90}
