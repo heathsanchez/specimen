@@ -1,0 +1,106 @@
+name: V159 dependent arg reconstruction separator
+
+on:
+  push:
+    branches: ["v159-dependent-arg-reconstruction-separator"]
+    paths:
+      - '.github/workflows/v159-dependent-arg-reconstruction-separator.yml'
+      - 'experiments/V159_DEPENDENT_ARG_RECONSTRUCTION_SEPARATOR_PREREG.md'
+  workflow_dispatch:
+
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact admitted K2 K5 only
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Freeze N T S fixtures
+        run: |
+          cat > /tmp/V159N.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V159SchemaN where Atom : Type
+          inductive V159SeqN (s : V159SchemaN) : Nat → List Nat → Prop where
+            | nil : V159SeqN s 0 []
+            | cons (x : Nat) {n : Nat} {xs : List Nat} : V159SeqN s n xs → V159SeqN s (Nat.succ n) (x :: xs)
+          derive_generator (fun (s : V159SchemaN) (n : Nat) => ∃ xs : List Nat, V159SeqN s n xs)
+          EOF
+          cat > /tmp/V159T.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          inductive V159SeqT (α : Type) : Nat → List α → Prop where
+            | nil : V159SeqT α 0 []
+            | cons (x : α) {n : Nat} {xs : List α} : V159SeqT α n xs → V159SeqT α (Nat.succ n) (x :: xs)
+          derive_generator (fun (α : Type) (n : Nat) => ∃ xs : List α, V159SeqT α n xs)
+          EOF
+          cat > /tmp/V159S.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V159SchemaS where Atom : Type
+          inductive V159SeqS (s : V159SchemaS) : Nat → List s.Atom → Prop where
+            | nil : V159SeqS s 0 []
+            | cons (x : s.Atom) {n : Nat} {xs : List s.Atom} : V159SeqS s n xs → V159SeqS s (Nat.succ n) (x :: xs)
+          derive_generator (fun (s : V159SchemaS) (n : Nat) => ∃ xs : List s.Atom, V159SeqS s n xs)
+          EOF
+      - name: Execute frozen separator
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          out={}
+          for name in ['N','T','S']:
+            p=subprocess.run(['lake','env','lean',f'/tmp/V159{name}.lean'],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v159_{name}.log').write_text(log); lo=log.lower()
+            if p.returncode==0:c='PASS'
+            elif 'unknown free variable' in lo:c='FREE_FVAR'
+            elif 'failed to synthesize' in lo:c='SYNTH_FAILURE'
+            elif 'unable to derive producer schedule' in lo or 'cannot derive constrained producer' in lo:c='SCHEDULE_FAILURE'
+            else:c='OTHER_FAILURE'
+            out[name]={'rc':p.returncode,'class':c,'tail':log[-12000:]}
+          pathlib.Path('v159_arms.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Protected suite
+        continue-on-error: true
+        run: |
+          set +e; lake build > v159_build.log 2>&1; B=$?; lake test > v159_test.log 2>&1; T=$?; set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v159_protected.json
+          exit 0
+      - name: Frozen V159 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def load(p): return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
+          a=load('v159_arms.json'); p=load('v159_protected.json')
+          if a is None or p is None: v='R10_INCONCLUSIVE'
+          elif p.get('build')!=0 or p.get('test')!=0: v='R10_PROTECTED_FAILURE'
+          else:
+            c=lambda k:a[k]['class']
+            if c('N')=='FREE_FVAR': v='V159_GENERAL_RECURSIVE_RESIDUAL'
+            elif c('N')!='FREE_FVAR' and c('T')=='FREE_FVAR' and c('S')=='FREE_FVAR': v='V159_GENERAL_DEPENDENT_ARG_RECONSTRUCTION'
+            elif c('N')!='FREE_FVAR' and c('T')!='FREE_FVAR' and c('S')=='FREE_FVAR': v='PASS_V159_STRUCTURE_DEPENDENT_ARG_RECONSTRUCTION_ISOLATED'
+            else: v='V159_MIXED_MECHANISM_RESULT'
+          r={'canonical_id':'V159_DEPENDENT_ARG_RECONSTRUCTION_SEPARATOR','arms':None if a is None else {k:x['class'] for k,x in a.items()},'protected':p,'verdict':v,'claim_boundary':'Mechanism localization only; no repair or V156 claim.'}
+          pathlib.Path('v159_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v159_result.json || true
+          for f in v159_N.log v159_T.log v159_S.log; do [ -f "$f" ] && { echo ==== $f ====; cat "$f"; }; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v159-dependent-arg-reconstruction-separator
+          path: v159_*
