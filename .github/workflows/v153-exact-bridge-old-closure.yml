@@ -1,0 +1,123 @@
+name: V153 exact bridge old closure
+
+on:
+  push:
+    branches: ["v153-exact-bridge-old-closure"]
+    paths:
+      - '.github/workflows/v153-exact-bridge-old-closure.yml'
+      - 'experiments/V153_EXACT_BRIDGE_OLD_CLOSURE_PREREG.md'
+  workflow_dispatch:
+
+jobs:
+  closure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact admitted K2 K5 only
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          git diff -- Specimen/DeriveConstrainedProducer.lean | tee v153_admitted.patch
+          if grep -Eq 'V153|P0|Box|Has' v153_admitted.patch; then exit 153; fi
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Freeze exact family and arms
+        run: |
+          cat > /tmp/V153Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V153P where Meta : Type
+          def V153P0 : V153P := ⟨Unit⟩
+          inductive V153Box (p : V153P) : Type where | mk : p.Meta → V153Box p
+          inductive V153Has {p : V153P} : V153Box p → Prop where | mk (x : p.Meta) : V153Has (V153Box.mk x)
+          EOF
+          cp /tmp/V153Common.lean /tmp/V153C0.lean
+          echo 'derive_mutual (fun (_ : Unit) => ∃ b : V153Box V153P0, V153Has b)' >> /tmp/V153C0.lean
+          cp /tmp/V153Common.lean /tmp/V153C1.lean
+          echo 'derive_mutual (fun (p : V153P) (_ : Unit) => ∃ b : V153Box p, V153Has b)' >> /tmp/V153C1.lean
+          cp /tmp/V153Common.lean /tmp/V153C2.lean
+          cat >> /tmp/V153C2.lean <<'EOF'
+          instance : Plausible.Arbitrary V153P0.Meta := by
+            change Plausible.Arbitrary Unit
+            infer_instance
+          derive_mutual (fun (_ : Unit) => ∃ b : V153Box V153P0, V153Has b)
+          EOF
+          cp /tmp/V153Common.lean /tmp/V153C3.lean
+          cat >> /tmp/V153C3.lean <<'EOF'
+          instance : Plausible.Arbitrary V153P0.Meta := by
+            change Plausible.Arbitrary Unit
+            infer_instance
+          derive_mutual (fun (p : V153P) [inst : Plausible.Arbitrary p.Meta] (_ : Unit) => ∃ b : V153Box p, V153Has b)
+          #synth ArbitrarySizedSuchThat (V153Box V153P0) (fun b => V153Has b)
+          EOF
+          cp /tmp/V153Common.lean /tmp/V153C4.lean
+          cat >> /tmp/V153C4.lean <<'EOF'
+          instance : Plausible.Arbitrary V153P0.Meta := by
+            change Plausible.Arbitrary Unit
+            infer_instance
+          instance (p : V153P) [Plausible.Arbitrary p.Meta] : ArbitrarySizedSuchThat (V153Box p) (fun b => V153Has b) where
+            arbitrarySizedST := fun _ => do
+              let x : p.Meta ← Plausible.Arbitrary.arbitrary
+              pure (V153Box.mk x)
+          #synth ArbitrarySizedSuchThat (V153Box V153P0) (fun b => V153Has b)
+          EOF
+          cp /tmp/V153Common.lean /tmp/V153C5.lean
+          cat >> /tmp/V153C5.lean <<'EOF'
+          instance : ArbitrarySizedSuchThat (V153Box V153P0) (fun b => V153Has b) where
+            arbitrarySizedST := fun _ => do
+              let x : Unit ← Plausible.Arbitrary.arbitrary
+              pure (V153Box.mk x)
+          #synth ArbitrarySizedSuchThat (V153Box V153P0) (fun b => V153Has b)
+          EOF
+      - name: Execute frozen C0-C5
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          out={}
+          for n in range(6):
+            name=f'C{n}'; p=subprocess.run(['lake','env','lean',f'/tmp/V153{name}.lean'],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v153_{name}.log').write_text(log); low=log.lower()
+            if p.returncode==0: c='PASS'
+            elif 'expected to be a variable' in low: c='NON_FVAR_APPLICABILITY'
+            elif 'failed to synthesize' in low and ('meta' in low or 'arbitrary' in low): c='SYMBOLIC_INSTANCE'
+            else: c='OTHER_FAILURE'
+            out[name]={'rc':p.returncode,'class':c,'tail':log[-6000:]}
+          pathlib.Path('v153_arms.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Protected baseline suite
+        run: |
+          set +e; lake build > v153_build.log 2>&1; B=$?; lake test > v153_test.log 2>&1; T=$?; set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v153_protected.json
+          [ "$B" -eq 0 ] && [ "$T" -eq 0 ]
+      - name: Frozen V153 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          a=json.loads(pathlib.Path('v153_arms.json').read_text()) if pathlib.Path('v153_arms.json').exists() else None
+          p=json.loads(pathlib.Path('v153_protected.json').read_text()) if pathlib.Path('v153_protected.json').exists() else None
+          if a is None or p is None:r={'canonical_id':'V153_EXACT_BRIDGE_OLD_CLOSURE','verdict':'R10_INCONCLUSIVE'}
+          else:
+            c=lambda n:a[f'C{n}']['class']; controls=c(0)=='NON_FVAR_APPLICABILITY' and c(1)=='SYMBOLIC_INSTANCE'; prot=p.get('build')==0 and p.get('test')==0
+            if not controls or not prot:v='R10_CONTROL_OR_PROTECTED_FAILURE'
+            elif c(2)=='PASS' or c(3)=='PASS':v='REJECT_K6_OLD_SPECIMEN_CLOSURE_SUFFICES'
+            elif c(4)=='PASS' and c(5)=='PASS':v='PASS_V153_EXPRESSIVE_CLOSURE_MISSING_AUTOMATION'
+            else:v='NEGATIVE_V153_BRIDGE_DOES_NOT_CLOSE_FAMILY'
+            r={'canonical_id':'V153_EXACT_BRIDGE_OLD_CLOSURE','arms':{k:x['class'] for k,x in a.items()},'protected':p,'verdict':v,'claim_boundary':'Distinguishes old Specimen closure from old Lean expressivity; no constructor-development claim.'}
+          pathlib.Path('v153_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v153_result.json || true
+          for f in v153_C*.log; do echo ==== $f ====; cat "$f"; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v153-exact-bridge-old-closure
+          path: v153_*
