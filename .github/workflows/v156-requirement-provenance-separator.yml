@@ -66,6 +66,7 @@ jobs:
             SpecimenTest/DeriveArbitrarySuchThat/InstanceParameterTest.lean \
             SpecimenTest/DeriveArbitrarySuchThat/MutuallyRecursiveRelationsTest.lean | tee v156_fixture_hashes.txt
           sha256sum protocols/V156_REQUIREMENT_PROVENANCE_SEPARATOR_PRECOMMIT.md \
+            protocols/V156A_ANCHOR_AND_PIPEFAIL_APPARATUS_ADDENDUM.md \
             scripts/v156_apply_requirement_provenance_promotion.py | tee v156_protocol_hashes.txt
 
       - name: Baseline and ablation record
@@ -84,7 +85,14 @@ jobs:
 
       - name: Apply frozen V156 intervention
         run: |
+          set -o pipefail
           python scripts/v156_apply_requirement_provenance_promotion.py | tee v156_apply.log
+          grep -q 'REQUIREMENT_PROVENANCE_PROMOTION_APPLIED' v156_apply.log
+          grep -q 'origin := .unconstrained' Specimen/MExp.lean
+          grep -q 'origin := .constrained' Specimen/MExp.lean
+          grep -q 'k6_required_outer_' Specimen/MakeConstrainedProducerInstance.lean
+          grep -q 'k6_required_inner_' Specimen/MakeConstrainedProducerInstance.lean
+          grep -q 'req.origin == .unconstrained' Specimen/DeriveConstrainedProducer.lean
           sha256sum scripts/v156_apply_requirement_provenance_promotion.py Specimen/MExp.lean \
             Specimen/MakeConstrainedProducerInstance.lean Specimen/DeriveConstrainedProducer.lean | tee v156_impl_hashes.txt
           lake build Specimen.MExp Specimen.MakeConstrainedProducerInstance Specimen.DeriveConstrainedProducer
@@ -129,7 +137,8 @@ jobs:
           import json,pathlib
           def load(p): return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
           b=load('v156_baseline.json'); a=load('v156_arms.json'); p=load('v156_protected.json')
-          apparatus=b is None or a is None or p is None or not pathlib.Path('v156_impl_hashes.txt').exists()
+          applied=pathlib.Path('v156_apply.log').exists() and 'REQUIREMENT_PROVENANCE_PROMOTION_APPLIED' in pathlib.Path('v156_apply.log').read_text()
+          apparatus=b is None or a is None or p is None or not pathlib.Path('v156_impl_hashes.txt').exists() or not applied
           if apparatus:
             r={'canonical_id':'V156_REQUIREMENT_PROVENANCE_SEPARATOR','verdict':'R10_V156_INCONCLUSIVE','earned_capability':None}
           else:
@@ -153,6 +162,7 @@ jobs:
         if: always()
         run: |
           cat v156_result.json || true
+          [ -f v156_apply.log ] && cat v156_apply.log || true
           for f in v156_PRIMARY.log v156_HELDOUT.log v156_MULTI.log v156_INSTANCE_PARAMETER.log v156_MUTUAL.log; do
             [ -f "$f" ] && { echo ==== $f ====; tail -100 "$f"; }
           done
@@ -161,7 +171,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: v156-requirement-provenance-separator
+          name: v156a-requirement-provenance-separator
           path: v156_*
           if-no-files-found: warn
           retention-days: 90
