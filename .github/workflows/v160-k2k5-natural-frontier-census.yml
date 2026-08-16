@@ -1,0 +1,96 @@
+name: V160 K2K5 natural frontier census
+on:
+  push:
+    branches: ["v160-k2k5-natural-frontier-census"]
+    paths: ['.github/workflows/v160-k2k5-natural-frontier-census.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: default, test: false, lint: false}
+      - name: Freeze candidate corpus before baseline
+        run: |
+          python - <<'PY'
+          import pathlib,hashlib,json
+          rows=[]
+          for p in sorted(pathlib.Path('SpecimenTest').rglob('*.lean')):
+            b=p.read_bytes()
+            if b'derive_generator' in b:
+              rows.append({'path':str(p),'sha256':hashlib.sha256(b).hexdigest()})
+          pathlib.Path('v160_manifest.json').write_text(json.dumps(rows,indent=2)+'\n')
+          print('candidate_count',len(rows))
+          for r in rows: print(r['sha256'],r['path'])
+          PY
+          sha256sum protocols/V160_K2K5_NATURAL_FRONTIER_CENSUS_PRECOMMIT.md scripts/v120_apply_binder_aware_fixed_parameter.py scripts/v132_apply_output_dependent_input_determined.py > v160_protocol_hashes.txt
+      - name: Apply exact K2 K5 only
+        run: |
+          set -o pipefail
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          rm -rf .lake/build
+      - name: Run full baseline census
+        run: |
+          set +e
+          lake build SpecimenTest > v160_baseline.log 2>&1; RC=$?
+          set -e
+          echo $RC > v160_baseline_rc.txt
+      - name: Classify deterministic census
+        run: |
+          python - <<'PY'
+          import json,pathlib,re,subprocess
+          manifest=json.loads(pathlib.Path('v160_manifest.json').read_text())
+          paths=[r['path'] for r in manifest]
+          log=pathlib.Path('v160_baseline.log').read_text(errors='replace')
+          # Lake emits failed target names; map file paths to dotted modules deterministically.
+          eligible=[]; observed=[]
+          for path in paths:
+            mod=path[:-5].replace('/','.')
+            # Only inspect this module's nearby lines if it appears in the build log.
+            if mod not in log and path not in log: continue
+            lines=log.splitlines()
+            idx=[i for i,l in enumerate(lines) if mod in l or path in l]
+            window='\n'.join(lines[max(0,min(idx)-8):min(len(lines),max(idx)+18)]) if idx else ''
+            semantic=any(x in window.lower() for x in ['failed to synthesize instance of type class','expected to be a variable','unknown free variable'])
+            failed=any(x in window.lower() for x in ['error:','✖','failed'])
+            if failed:
+              observed.append({'path':path,'module':mod,'semantic':semantic,'window':window[-3000:]})
+              if semantic: eligible.append((path,mod,window[-3000:]))
+          eligible.sort()
+          selected=None
+          reproduction=None
+          if eligible:
+            path,mod,_=eligible[0]
+            p=subprocess.run(['lake','build',mod],capture_output=True,text=True)
+            l=p.stdout+p.stderr
+            semantic=any(x in l.lower() for x in ['failed to synthesize instance of type class','expected to be a variable','unknown free variable'])
+            reproduction={'path':path,'module':mod,'rc':p.returncode,'semantic':semantic,'log_tail':l[-4000:]}
+            if p.returncode!=0 and semantic: selected={'path':path,'module':mod}
+          rc=int(pathlib.Path('v160_baseline_rc.txt').read_text().strip())
+          if selected:
+            verdict='PASS_V160_NATURAL_LATER_FRONTIER_EXISTS'
+          elif rc==0:
+            verdict='CORPUS_CEILING_V160_NO_K2K5_LATER_FRONTIER'
+          elif eligible and reproduction and not reproduction['semantic']:
+            verdict='R10_V160_REPRODUCTION_INCONCLUSIVE'
+          else:
+            verdict='INCONCLUSIVE_V160_NONELIGIBLE_BASELINE_FAILURES'
+          out={'canonical_id':'V160_K2K5_NATURAL_FRONTIER_CENSUS','baseline_rc':rc,'candidate_count':len(paths),'observed_failures':observed,'eligible_count':len(eligible),'selected':selected,'reproduction':reproduction,'verdict':verdict}
+          pathlib.Path('v160_result.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v160_result.json || true
+          tail -200 v160_baseline.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v160-k2k5-natural-frontier-census
+          path: v160_*
+          retention-days: 90
