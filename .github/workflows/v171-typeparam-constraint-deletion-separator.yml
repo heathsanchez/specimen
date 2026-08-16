@@ -1,0 +1,96 @@
+name: V171 typeparam constraint deletion separator
+on:
+  push:
+    branches: ["v171-typeparam-constraint-deletion-separator"]
+    paths: ['.github/workflows/v171-typeparam-constraint-deletion-separator.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: default, test: false, lint: false}
+      - name: Freeze protocol fixtures and mechanisms
+        run: |
+          set -euo pipefail
+          sha256sum protocols/V171_TYPEPARAM_CONSTRAINT_DELETION_SEPARATOR.md \
+            fixtures/V170_ISSUE19_PARAMETER_OVERCONSTRAINT.lean \
+            fixtures/V171_GENERATED_TYPE_SAFETY.lean fixtures/V171_EQUALITY_TYPEPARAM_SAFETY.lean \
+            scripts/v120_apply_binder_aware_fixed_parameter.py scripts/v132_apply_output_dependent_input_determined.py \
+            scripts/v156_apply_requirement_provenance_promotion.py scripts/v156b_apply_checker_consumer_compat.py \
+            scripts/v158_apply_scope_dependent_promotion.py scripts/v168_apply_certified_constructor_irrefutability.py \
+            scripts/v171_apply_delete_default_typeparam_constraints.py | tee v171_hashes.txt
+      - name: Define helpers
+        run: |
+          cat > /tmp/v171.sh <<'SH'
+          set -euo pipefail
+          prior() {
+            python scripts/v120_apply_binder_aware_fixed_parameter.py
+            python scripts/v132_apply_output_dependent_input_determined.py
+            python scripts/v156_apply_requirement_provenance_promotion.py
+            python scripts/v156b_apply_checker_consumer_compat.py
+            python scripts/v158_apply_scope_dependent_promotion.py
+            python scripts/v168_apply_certified_constructor_irrefutability.py
+          }
+          clean() { git checkout HEAD -- Specimen SpecimenTest; rm -rf .lake/build; }
+          build() { lake build Plausible Specimen; }
+          probe() { local f="$1" p="$2"; set +e; lake env lean "$f" > "$p.log" 2>&1; local r=$?; set -e; echo "$r" > "$p.rc"; }
+          SH
+      - name: Arm A prior stack
+        run: |
+          source /tmp/v171.sh
+          clean; prior > v171_A_apply.log 2>&1; build > v171_A_build.log 2>&1
+          probe fixtures/V170_ISSUE19_PARAMETER_OVERCONSTRAINT.lean v171_A_natural
+          probe fixtures/V171_GENERATED_TYPE_SAFETY.lean v171_A_generated
+          probe fixtures/V171_EQUALITY_TYPEPARAM_SAFETY.lean v171_A_equality
+      - name: Arm B blind deletion
+        run: |
+          source /tmp/v171.sh
+          clean; prior > v171_B_prior.log 2>&1
+          python scripts/v171_apply_delete_default_typeparam_constraints.py | tee v171_B_delete.log
+          grep -q V171_DEFAULT_TYPEPARAM_CONSTRAINTS_DELETED v171_B_delete.log
+          build > v171_B_build.log 2>&1
+          probe fixtures/V170_ISSUE19_PARAMETER_OVERCONSTRAINT.lean v171_B_natural
+          probe fixtures/V171_GENERATED_TYPE_SAFETY.lean v171_B_generated
+          probe fixtures/V171_EQUALITY_TYPEPARAM_SAFETY.lean v171_B_equality
+      - name: Arm C independent ablation
+        run: |
+          source /tmp/v171.sh
+          clean; prior > v171_C_apply.log 2>&1; build > v171_C_build.log 2>&1
+          probe fixtures/V170_ISSUE19_PARAMETER_OVERCONSTRAINT.lean v171_C_natural
+      - name: Frozen V171 classification
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def arm(p):
+            rp=pathlib.Path(p+'.rc'); lp=pathlib.Path(p+'.log')
+            rc=int(rp.read_text().strip()) if rp.exists() else None
+            log=lp.read_text(errors='replace') if lp.exists() else ''
+            lo=log.lower()
+            return {'rc':rc,'failed_synth':'failed to synthesize' in lo,'fixed':'v170fixed' in lo,'tail':log[-2200:]}
+          A={k:arm('v171_A_'+k) for k in ['natural','generated','equality']}
+          B={k:arm('v171_B_'+k) for k in ['natural','generated','equality']}
+          C={'natural':arm('v171_C_natural')}
+          apparatus=not all(pathlib.Path(x).exists() for x in ['v171_A_build.log','v171_B_build.log','v171_C_build.log','v171_B_delete.log'])
+          gates={'A_natural_fails':A['natural']['rc'] not in (None,0),'A_generated_passes':A['generated']['rc']==0,'A_equality_passes':A['equality']['rc']==0,
+                 'B_natural_rescued':B['natural']['rc']==0,'B_generated_passes':B['generated']['rc']==0,'B_equality_passes':B['equality']['rc']==0,
+                 'C_natural_restores':C['natural']['rc'] not in (None,0)}
+          if apparatus: verdict='R10_V171_INCONCLUSIVE'
+          elif gates['B_natural_rescued'] and gates['B_generated_passes'] and gates['B_equality_passes'] and all(gates.values()): verdict='PASS_V171_DELETION_SUFFICIENT'
+          elif gates['B_natural_rescued'] and (not gates['B_generated_passes'] or not gates['B_equality_passes']): verdict='SEPARATOR_V171_BLIND_DELETION_RESCUES_NATURAL_BUT_BREAKS_REQUIRED_CAPABILITY'
+          else: verdict='NEGATIVE_V171_DELETION_NOT_SUFFICIENT'
+          out={'canonical_id':'V171_TYPEPARAM_CONSTRAINT_DELETION_SEPARATOR','apparatus':apparatus,'gates':gates,'A':A,'B':B,'C':C,'verdict':verdict}
+          pathlib.Path('v171_result.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v171_result.json || true
+          for f in v171_*_natural.log v171_*_generated.log v171_*_equality.log; do echo ===$f===; tail -80 "$f" 2>/dev/null || true; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: v171-typeparam-constraint-deletion-separator, path: 'v171*', retention-days: 90}
