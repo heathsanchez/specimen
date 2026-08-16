@@ -52,33 +52,26 @@ jobs:
           derive_mutual (fun (_ : Unit) => ∃ b : V140Box V140P0, V140Has b)
           EOF
 
+          # Apparatus correction after R10 run 31938842310: derive_mutual elaborates
+          # the submitted term in its own command context, so section variables are
+          # not visible to the command elaborator. Bind the same frozen p and instance
+          # directly in the term; this changes no scientific arm or engine mechanism.
           cp /tmp/V140Common.lean /tmp/V140C1.lean
           cat >> /tmp/V140C1.lean <<'EOF'
 
-          section
-          variable (p : V140P)
-          derive_mutual (fun (_ : Unit) => ∃ b : V140Box p, V140Has b)
-          end
+          derive_mutual (fun (p : V140P) (_ : Unit) => ∃ b : V140Box p, V140Has b)
           EOF
 
           cp /tmp/V140Common.lean /tmp/V140C2.lean
           cat >> /tmp/V140C2.lean <<'EOF'
 
-          section
-          variable (p : V140P)
-          variable [Plausible.Arbitrary p.Meta]
-          derive_mutual (fun (_ : Unit) => ∃ b : V140Box p, V140Has b)
-          end
+          derive_mutual (fun (p : V140P) (_inst : Plausible.Arbitrary p.Meta) (_ : Unit) => ∃ b : V140Box p, V140Has b)
           EOF
 
           cp /tmp/V140Common.lean /tmp/V140C3.lean
           cat >> /tmp/V140C3.lean <<'EOF'
 
-          section
-          variable (p : V140P)
-          variable [Plausible.Arbitrary p.Meta]
-          derive_mutual (fun (_ : Unit) => ∃ b : V140Box p, V140Has b)
-          end
+          derive_mutual (fun (p : V140P) (_inst : Plausible.Arbitrary p.Meta) (_ : Unit) => ∃ b : V140Box p, V140Has b)
 
           #synth ArbitrarySizedSuchThat (V140Box V140P0) (fun b => V140Has b)
           EOF
