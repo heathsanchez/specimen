@@ -1,0 +1,132 @@
+name: V174 output-live typeparam capability
+on:
+  push:
+    branches: ["v174-output-live-typeparam-capability"]
+    paths: ['.github/workflows/v174-output-live-typeparam-capability.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: false, test: false, lint: false}
+      - name: Freeze protocol fixtures baseline and candidate
+        run: |
+          set -euo pipefail
+          lake --version
+          sha256sum protocols/V174_OUTPUT_LIVE_TYPEPARAM_CAPABILITY.md \
+            fixtures/V172_MAP_SHAPED_FIXED_PARAMS.lean fixtures/V172_SET_SHAPED_FIXED_PARAM.lean \
+            fixtures/V171_GENERATED_TYPE_SAFETY.lean fixtures/V171_EQUALITY_TYPEPARAM_SAFETY.lean \
+            scripts/v120_apply_binder_aware_fixed_parameter.py scripts/v132_apply_output_dependent_input_determined.py \
+            scripts/v156_apply_requirement_provenance_promotion.py scripts/v156b_apply_checker_consumer_compat.py \
+            scripts/v158_apply_scope_dependent_promotion.py scripts/v168_apply_certified_constructor_irrefutability.py \
+            scripts/v169_remove_obsolete_redundant_match_expectations.py \
+            scripts/v174_apply_output_live_typeparam_capability.py | tee v174_hashes.txt
+      - name: Define helpers
+        run: |
+          cat > /tmp/v174.sh <<'SH'
+          set -euo pipefail
+          prior() {
+            python scripts/v120_apply_binder_aware_fixed_parameter.py
+            python scripts/v132_apply_output_dependent_input_determined.py
+            python scripts/v156_apply_requirement_provenance_promotion.py
+            python scripts/v156b_apply_checker_consumer_compat.py
+            python scripts/v158_apply_scope_dependent_promotion.py
+            python scripts/v168_apply_certified_constructor_irrefutability.py
+            python scripts/v169_remove_obsolete_redundant_match_expectations.py
+          }
+          clean() { git checkout HEAD -- Specimen SpecimenTest; rm -rf .lake/build; }
+          probe() { local f="$1" p="$2"; set +e; lake env lean "$f" > "$p.log" 2>&1; local r=$?; set -e; echo "$r" > "$p.rc"; }
+          scope_audit() {
+            local p="$1"
+            git diff --name-only -- SpecimenTest | sort > "${p}_maintenance_names.txt"
+            cat > "${p}_expected_names.txt" <<'EOF'
+          SpecimenTest/DeriveArbitrarySuchThat/FunctionCallsTest.lean
+          SpecimenTest/DeriveArbitrarySuchThat/NEqGenerator.lean
+          SpecimenTest/DeriveArbitrarySuchThat/Syntax.lean
+          EOF
+            diff -u "${p}_expected_names.txt" "${p}_maintenance_names.txt"
+          }
+          SH
+      - name: Arm A complete admitted baseline
+        run: |
+          source /tmp/v174.sh
+          clean; prior > v174_A_apply.log 2>&1; scope_audit v174_A
+          set +e
+          lake build > v174_A_fullbuild.log 2>&1; echo $? > v174_A_fullbuild.rc
+          lake test > v174_A_test.log 2>&1; echo $? > v174_A_test.rc
+          set -e
+          probe fixtures/V172_MAP_SHAPED_FIXED_PARAMS.lean v174_A_map
+          probe fixtures/V172_SET_SHAPED_FIXED_PARAM.lean v174_A_set
+      - name: Arm B output-live candidate
+        run: |
+          source /tmp/v174.sh
+          clean; prior > v174_B_prior.log 2>&1; scope_audit v174_B
+          python scripts/v174_apply_output_live_typeparam_capability.py | tee v174_B_candidate.log
+          grep -q V174_OUTPUT_LIVE_TYPEPARAM_CAPABILITY_APPLIED v174_B_candidate.log
+          set +e
+          lake build > v174_B_fullbuild.log 2>&1; echo $? > v174_B_fullbuild.rc
+          lake test > v174_B_test.log 2>&1; echo $? > v174_B_test.rc
+          set -e
+          probe fixtures/V172_MAP_SHAPED_FIXED_PARAMS.lean v174_B_map
+          probe fixtures/V172_SET_SHAPED_FIXED_PARAM.lean v174_B_set
+          probe fixtures/V171_GENERATED_TYPE_SAFETY.lean v174_B_generated
+          probe fixtures/V171_EQUALITY_TYPEPARAM_SAFETY.lean v174_B_equality
+      - name: Arm C independent ablation
+        run: |
+          source /tmp/v174.sh
+          clean; prior > v174_C_apply.log 2>&1; scope_audit v174_C
+          lake build Plausible Specimen > v174_C_build.log 2>&1
+          probe fixtures/V172_MAP_SHAPED_FIXED_PARAMS.lean v174_C_map
+          probe fixtures/V172_SET_SHAPED_FIXED_PARAM.lean v174_C_set
+      - name: Frozen V174 classification
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def arm(p):
+            rp=pathlib.Path(p+'.rc'); lp=pathlib.Path(p+'.log')
+            rc=int(rp.read_text().strip()) if rp.exists() else None
+            log=lp.read_text(errors='replace') if lp.exists() else ''
+            return {'rc':rc,'failed_synth':'failed to synthesize' in log.lower(),'tail':log[-1500:]}
+          def rcfile(p):
+            q=pathlib.Path(p); return int(q.read_text().strip()) if q.exists() else None
+          A={'map':arm('v174_A_map'),'set':arm('v174_A_set')}
+          B={'map':arm('v174_B_map'),'set':arm('v174_B_set'),'generated':arm('v174_B_generated'),'equality':arm('v174_B_equality')}
+          C={'map':arm('v174_C_map'),'set':arm('v174_C_set')}
+          vals={'A_build':rcfile('v174_A_fullbuild.rc'),'A_test':rcfile('v174_A_test.rc'),'B_build':rcfile('v174_B_fullbuild.rc'),'B_test':rcfile('v174_B_test.rc')}
+          expected=['SpecimenTest/DeriveArbitrarySuchThat/FunctionCallsTest.lean','SpecimenTest/DeriveArbitrarySuchThat/NEqGenerator.lean','SpecimenTest/DeriveArbitrarySuchThat/Syntax.lean']
+          scopes={x:(pathlib.Path(f'v174_{x}_maintenance_names.txt').read_text().splitlines() if pathlib.Path(f'v174_{x}_maintenance_names.txt').exists() else []) for x in ['A','B','C']}
+          required=['v174_A_fullbuild.rc','v174_A_test.rc','v174_B_fullbuild.rc','v174_B_test.rc','v174_B_candidate.log','v174_C_build.log']
+          apparatus=not all(pathlib.Path(x).exists() for x in required)
+          gates={
+            'maintenance_scope':all(scopes[x]==expected for x in ['A','B','C']),
+            'A_full_build':vals['A_build']==0,'A_full_test':vals['A_test']==0,
+            'A_map_specific_failure':A['map']['rc'] not in (None,0) and A['map']['failed_synth'],
+            'A_set_specific_failure':A['set']['rc'] not in (None,0) and A['set']['failed_synth'],
+            'B_full_build':vals['B_build']==0,'B_full_test':vals['B_test']==0,
+            'B_map_transfer':B['map']['rc']==0,'B_set_transfer':B['set']['rc']==0,
+            'B_generated_safety':B['generated']['rc']==0,'B_equality_safety':B['equality']['rc']==0,
+            'C_map_restores':C['map']['rc'] not in (None,0) and C['map']['failed_synth'],
+            'C_set_restores':C['set']['rc'] not in (None,0) and C['set']['failed_synth'],
+          }
+          if apparatus: verdict='R10_V174_INCONCLUSIVE'
+          elif all(gates.values()): verdict='PASS_V174_OUTPUT_LIVE_TYPEPARAM_CAPABILITY'
+          elif vals['B_build'] != 0 or vals['B_test'] != 0: verdict='KILL_V174_PROTECTED_REGRESSION'
+          else: verdict='NEGATIVE_V174_NOT_ESTABLISHED'
+          out={'canonical_id':'V174_OUTPUT_LIVE_TYPEPARAM_CAPABILITY','apparatus':apparatus,'gates':gates,'rc':vals,'A':A,'B':B,'C':C,'scopes':scopes,'verdict':verdict}
+          pathlib.Path('v174_result.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v174_result.json || true
+          tail -120 v174_B_fullbuild.log 2>/dev/null || true
+          tail -160 v174_B_test.log 2>/dev/null || true
+          for f in v174_*_map.log v174_*_set.log v174_B_generated.log v174_B_equality.log; do echo ===$f===; tail -50 "$f" 2>/dev/null || true; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: v174-output-live-typeparam-capability, path: 'v174*', retention-days: 90}
