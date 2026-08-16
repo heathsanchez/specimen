@@ -1,0 +1,111 @@
+name: V173 protected diagnostic semantic separator
+on:
+  push:
+    branches: ["v173-protected-diagnostic-semantic-separator"]
+    paths: ['.github/workflows/v173-protected-diagnostic-semantic-separator.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: false, test: false, lint: false}
+      - name: Freeze protocol and semantic fixture
+        run: |
+          set -euo pipefail
+          lake --version
+          sha256sum protocols/V173_PROTECTED_DIAGNOSTIC_SEMANTIC_SEPARATOR.md \
+            fixtures/V173_PROTECTED_DIAGNOSTIC_SEMANTICS.lean \
+            SpecimenTest/DeriveArbitrarySuchThat/Syntax.lean \
+            SpecimenTest/DeriveArbitrarySuchThat/FunctionCallsTest.lean \
+            SpecimenTest/DeriveArbitrarySuchThat/NEqGenerator.lean \
+            scripts/v120_apply_binder_aware_fixed_parameter.py scripts/v132_apply_output_dependent_input_determined.py \
+            scripts/v156_apply_requirement_provenance_promotion.py scripts/v156b_apply_checker_consumer_compat.py \
+            scripts/v158_apply_scope_dependent_promotion.py scripts/v168_apply_certified_constructor_irrefutability.py \
+            scripts/v171_apply_delete_default_typeparam_constraints.py | tee v173_hashes.txt
+      - name: Define helpers
+        run: |
+          cat > /tmp/v173.sh <<'SH'
+          set -euo pipefail
+          prior() {
+            python scripts/v120_apply_binder_aware_fixed_parameter.py
+            python scripts/v132_apply_output_dependent_input_determined.py
+            python scripts/v156_apply_requirement_provenance_promotion.py
+            python scripts/v156b_apply_checker_consumer_compat.py
+            python scripts/v158_apply_scope_dependent_promotion.py
+            python scripts/v168_apply_certified_constructor_irrefutability.py
+          }
+          clean() { git checkout HEAD -- Specimen SpecimenTest; rm -rf .lake/build; }
+          corebuild() { lake build Plausible Specimen; }
+          probe() { local f="$1" p="$2"; set +e; lake env lean "$f" > "$p.log" 2>&1; local r=$?; set -e; echo "$r" > "$p.rc"; }
+          snapshots() {
+            local arm="$1"
+            probe SpecimenTest/DeriveArbitrarySuchThat/Syntax.lean "v173_${arm}_syntax"
+            probe SpecimenTest/DeriveArbitrarySuchThat/FunctionCallsTest.lean "v173_${arm}_functioncalls"
+            probe SpecimenTest/DeriveArbitrarySuchThat/NEqGenerator.lean "v173_${arm}_neq"
+          }
+          SH
+      - name: Arm A prior semantics and original snapshots
+        run: |
+          source /tmp/v173.sh
+          clean; prior > v173_A_apply.log 2>&1; corebuild > v173_A_build.log 2>&1
+          probe fixtures/V173_PROTECTED_DIAGNOSTIC_SEMANTICS.lean v173_A_semantics
+          snapshots A
+      - name: Arm B deletion semantics and original snapshots
+        run: |
+          source /tmp/v173.sh
+          clean; prior > v173_B_prior.log 2>&1
+          python scripts/v171_apply_delete_default_typeparam_constraints.py | tee v173_B_delete.log
+          grep -q V171_DEFAULT_TYPEPARAM_CONSTRAINTS_DELETED_ALL_EMITTERS v173_B_delete.log
+          corebuild > v173_B_build.log 2>&1
+          probe fixtures/V173_PROTECTED_DIAGNOSTIC_SEMANTICS.lean v173_B_semantics
+          snapshots B
+      - name: Arm C independent ablation
+        run: |
+          source /tmp/v173.sh
+          clean; prior > v173_C_apply.log 2>&1; corebuild > v173_C_build.log 2>&1
+          probe fixtures/V173_PROTECTED_DIAGNOSTIC_SEMANTICS.lean v173_C_semantics
+          snapshots C
+      - name: Frozen V173 classification
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def arm(p):
+            rp=pathlib.Path(p+'.rc'); lp=pathlib.Path(p+'.log')
+            rc=int(rp.read_text().strip()) if rp.exists() else None
+            log=lp.read_text(errors='replace') if lp.exists() else ''
+            lo=log.lower()
+            return {'rc':rc,'guard_mismatch':('docstring on `#guard_msgs` does not match generated message' in lo or 'does not match generated message' in lo),'tail':log[-1800:]}
+          A={k:arm('v173_A_'+k) for k in ['semantics','syntax','functioncalls','neq']}
+          B={k:arm('v173_B_'+k) for k in ['semantics','syntax','functioncalls','neq']}
+          C={k:arm('v173_C_'+k) for k in ['semantics','syntax','functioncalls','neq']}
+          required=['v173_A_build.log','v173_B_build.log','v173_C_build.log','v173_B_delete.log']
+          apparatus=not all(pathlib.Path(x).exists() for x in required)
+          gates={
+            'A_semantics':A['semantics']['rc']==0,
+            'B_semantics':B['semantics']['rc']==0,
+            'C_semantics':C['semantics']['rc']==0,
+            'A_snapshots':all(A[k]['rc']==0 for k in ['syntax','functioncalls','neq']),
+            'B_snapshots_change':all(B[k]['rc'] not in (None,0) and B[k]['guard_mismatch'] for k in ['syntax','functioncalls','neq']),
+            'C_snapshots_restore':all(C[k]['rc']==0 for k in ['syntax','functioncalls','neq']),
+            'B_core_build':pathlib.Path('v173_B_build.log').exists(),
+          }
+          if apparatus: verdict='R10_V173_INCONCLUSIVE'
+          elif all(gates.values()): verdict='PASS_V173_PROTECTED_FAILURE_DIAGNOSTIC_ORACLE_ONLY_SEMANTICS_PRESERVED'
+          elif B['semantics']['rc'] != 0: verdict='KILL_V173_SEMANTIC_REGRESSION'
+          else: verdict='NEGATIVE_V173_DIAGNOSTIC_ONLY_NOT_ESTABLISHED'
+          out={'canonical_id':'V173_PROTECTED_DIAGNOSTIC_SEMANTIC_SEPARATOR','apparatus':apparatus,'gates':gates,'A':A,'B':B,'C':C,'verdict':verdict}
+          pathlib.Path('v173_result.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v173_result.json || true
+          for f in v173_*_semantics.log v173_*_syntax.log v173_*_functioncalls.log v173_*_neq.log; do echo ===$f===; tail -80 "$f" 2>/dev/null || true; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: v173-protected-diagnostic-semantic-separator, path: 'v173*', retention-days: 90}
