@@ -1,0 +1,120 @@
+name: V162C upstream issue9 qualified apparatus
+on:
+  push:
+    branches: ["v162c-upstream-issue9-qualified-apparatus"]
+    paths: ['.github/workflows/v162c-upstream-issue9-qualified-apparatus.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  causal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: default, test: false, lint: false}
+      - name: Freeze unchanged science
+        run: |
+          sha256sum protocols/V162_UPSTREAM_ISSUE9_K6_CAUSAL_PRECOMMIT.md reports/V162B_R10_PLAUSIBLE_IMPORT_CORRECTION.md fixtures/V162_UPSTREAM_ISSUE9_REPRO.lean scripts/v120_apply_binder_aware_fixed_parameter.py scripts/v132_apply_output_dependent_input_determined.py scripts/v156_apply_requirement_provenance_promotion.py scripts/v156b_apply_checker_consumer_compat.py scripts/v158_apply_scope_dependent_promotion.py | tee v162c_hashes.txt
+          test "$(sha256sum fixtures/V162_UPSTREAM_ISSUE9_REPRO.lean | awk '{print $1}')" = "1e637c0269bb2c215dc71847df4c51207a76802350ad9eeead8201600ee62a51"
+          test "$(sha256sum scripts/v156_apply_requirement_provenance_promotion.py | awk '{print $1}')" = "17074519a184a741e74466aa81604e809a14478abc15568f845395c788664d5c"
+          test "$(sha256sum scripts/v156b_apply_checker_consumer_compat.py | awk '{print $1}')" = "8f3f7869fd775a8b6390e9d1483faa6a5d63bb4f52722b85f8374f17d1befd78"
+          test "$(sha256sum scripts/v158_apply_scope_dependent_promotion.py | awk '{print $1}')" = "d88527a37a480313ac01a4730832f10f7f7ca6273c338e0523eacddea3200826"
+      - name: Qualify imports before science
+        run: |
+          lake build Plausible
+          lake build Specimen
+          cat > /tmp/v162c_import_probe.lean <<'EOF'
+          import Plausible
+          import Specimen.DeriveConstrainedProducer
+          #check Plausible.Arbitrary
+          EOF
+          lake env lean /tmp/v162c_import_probe.lean | tee v162c_import_probe.log
+      - name: Arm A K2 K5
+        run: |
+          git checkout HEAD -- Specimen SpecimenTest
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          rm -rf .lake/build
+          lake build Specimen > v162c_A_rebuild.log 2>&1
+          python - <<'PY'
+          import subprocess,time,json,pathlib
+          t=time.monotonic(); p=subprocess.run(['timeout','120s','lake','env','lean','fixtures/V162_UPSTREAM_ISSUE9_REPRO.lean'],capture_output=True,text=True); dt=time.monotonic()-t
+          log=p.stdout+p.stderr; pathlib.Path('v162c_A.log').write_text(log)
+          apparatus=any(s in log.lower() for s in ['unknown module prefix','object file'])
+          cls='R10' if apparatus else ('PASS' if p.returncode==0 else ('TIMEOUT' if p.returncode==124 else 'SEMANTIC_OR_ELAB_FAILURE'))
+          r={'rc':p.returncode,'class':cls,'wall_seconds':dt,'apparatus':apparatus}; pathlib.Path('v162c_A.json').write_text(json.dumps(r,indent=2)+'\n'); print(r)
+          PY
+      - name: Arm B K2 K5 plus admitted K6
+        run: |
+          set -o pipefail
+          git checkout HEAD -- Specimen SpecimenTest
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          python scripts/v156_apply_requirement_provenance_promotion.py | tee v162c_B_v156.log
+          python scripts/v156b_apply_checker_consumer_compat.py | tee v162c_B_v156b.log
+          python scripts/v158_apply_scope_dependent_promotion.py | tee v162c_B_v158.log
+          grep -q REQUIREMENT_PROVENANCE_PROMOTION_APPLIED v162c_B_v156.log
+          grep -q V156B_CHECKER_CONSUMER_COMPAT_APPLIED v162c_B_v156b.log
+          grep -q SCOPE_DEPENDENT_REQUIREMENT_PROMOTION_APPLIED v162c_B_v158.log
+          rm -rf .lake/build
+          lake build Specimen > v162c_B_rebuild.log 2>&1
+          python - <<'PY'
+          import subprocess,time,json,pathlib
+          t=time.monotonic(); p=subprocess.run(['timeout','120s','lake','env','lean','fixtures/V162_UPSTREAM_ISSUE9_REPRO.lean'],capture_output=True,text=True); dt=time.monotonic()-t
+          log=p.stdout+p.stderr; pathlib.Path('v162c_B.log').write_text(log)
+          apparatus=any(s in log.lower() for s in ['unknown module prefix','object file'])
+          cls='R10' if apparatus else ('PASS' if p.returncode==0 else ('TIMEOUT' if p.returncode==124 else 'SEMANTIC_OR_ELAB_FAILURE'))
+          r={'rc':p.returncode,'class':cls,'wall_seconds':dt,'apparatus':apparatus}; pathlib.Path('v162c_B.json').write_text(json.dumps(r,indent=2)+'\n'); print(r)
+          PY
+      - name: Arm B protected behavior
+        continue-on-error: true
+        run: |
+          set +e
+          lake build > v162c_B_build.log 2>&1; BB=$?
+          lake test > v162c_B_test.log 2>&1; BT=$?
+          set -e
+          printf '{"build":%s,"test":%s}\n' "$BB" "$BT" > v162c_B_protected.json
+      - name: Arm C independent K6 ablation
+        run: |
+          git checkout HEAD -- Specimen SpecimenTest
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          rm -rf .lake/build
+          lake build Specimen > v162c_C_rebuild.log 2>&1
+          python - <<'PY'
+          import subprocess,time,json,pathlib
+          t=time.monotonic(); p=subprocess.run(['timeout','120s','lake','env','lean','fixtures/V162_UPSTREAM_ISSUE9_REPRO.lean'],capture_output=True,text=True); dt=time.monotonic()-t
+          log=p.stdout+p.stderr; pathlib.Path('v162c_C.log').write_text(log)
+          apparatus=any(s in log.lower() for s in ['unknown module prefix','object file'])
+          cls='R10' if apparatus else ('PASS' if p.returncode==0 else ('TIMEOUT' if p.returncode==124 else 'SEMANTIC_OR_ELAB_FAILURE'))
+          r={'rc':p.returncode,'class':cls,'wall_seconds':dt,'apparatus':apparatus}; pathlib.Path('v162c_C.json').write_text(json.dumps(r,indent=2)+'\n'); print(r)
+          PY
+      - name: Frozen V162C verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def load(p): return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
+          A=load('v162c_A.json'); B=load('v162c_B.json'); C=load('v162c_C.json'); P=load('v162c_B_protected.json')
+          apparatus=any(x is None for x in [A,B,C,P]) or any(x and (x.get('apparatus') or x.get('class')=='R10') for x in [A,B,C]) or not pathlib.Path('v162c_import_probe.log').exists()
+          if apparatus: out={'canonical_id':'V162C_UPSTREAM_ISSUE9_K6_CAUSAL','verdict':'R10_V162C_INCONCLUSIVE','constructor_development':False}
+          else:
+            protected=P.get('build')==0 and P.get('test')==0
+            causal=(A['class']!='PASS' and B['class']=='PASS' and C['class']!='PASS' and protected)
+            same=A['class']==B['class']==C['class']
+            if causal: v='PASS_V162C_K6_CAUSES_UPSTREAM_ISSUE9_REACHABILITY'
+            elif same: v='NEGATIVE_V162C_K6_NO_EFFECT_ON_ISSUE9'
+            elif A['class']=='PASS' and B['class']=='PASS': v='NULL_V162C_NO_REACHABILITY_MOVEMENT'
+            else: v='INCONCLUSIVE_V162C_MIXED_PATTERN'
+            out={'canonical_id':'V162C_UPSTREAM_ISSUE9_K6_CAUSAL','A':A,'B':B,'C':C,'B_protected':P,'protected_pass':protected,'verdict':v,'constructor_development':causal,'claim_boundary':'Issue #9 only; same frozen scientific task; apparatus prequalified before arms.'}
+          pathlib.Path('v162c_result.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n'); print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v162c_result.json || true
+          for f in v162c_A.log v162c_B.log v162c_C.log; do [ -f "$f" ] && { echo ==== $f ====; tail -120 "$f"; }; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: v162c-upstream-issue9-qualified-apparatus, path: 'v162c_*', retention-days: 90}
