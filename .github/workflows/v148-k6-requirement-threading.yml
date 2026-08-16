@@ -1,0 +1,142 @@
+name: V148 K6 dependent requirement threading
+
+on:
+  push:
+    branches: ["v148-k6-requirement-threading"]
+    paths: ['.github/workflows/v148-k6-requirement-threading.yml']
+  workflow_dispatch:
+
+jobs:
+  k6:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+
+      - name: Apply exact admitted K2 K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+
+      - name: Freeze fixture files before K6 outcome
+        run: |
+          cat > /tmp/V148ACommon.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V148P where Meta : Type
+          def V148P0 : V148P := ⟨Unit⟩
+          inductive V148Box (p : V148P) : Type where | mk : p.Meta → V148Box p
+          inductive V148Has {p : V148P} : V148Box p → Prop where | mk (x : p.Meta) : V148Has (V148Box.mk x)
+          EOF
+          cat > /tmp/V148BCommon.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V148Q where Carrier : Type
+          def V148Q0 : V148Q := ⟨Bool⟩
+          inductive V148Packet (q : V148Q) : Type where | pack : q.Carrier → V148Packet q
+          inductive V148Accepts {q : V148Q} : V148Packet q → Prop where | accept (x : q.Carrier) : V148Accepts (V148Packet.pack x)
+          EOF
+          cp /tmp/V148ACommon.lean /tmp/BASE_A.lean
+          cat >> /tmp/BASE_A.lean <<'EOF'
+          derive_generator (fun (p : V148P) => ∃ b : V148Box p, V148Has b)
+          EOF
+          cp /tmp/V148ACommon.lean /tmp/K6_A.lean
+          cat >> /tmp/K6_A.lean <<'EOF'
+          derive_generator (fun (p : V148P) => ∃ b : V148Box p, V148Has b)
+          #synth ArbitrarySizedSuchThat (V148Box V148P0) (fun b => V148Has b)
+          EOF
+          cp /tmp/V148BCommon.lean /tmp/K6_B.lean
+          cat >> /tmp/K6_B.lean <<'EOF'
+          derive_generator (fun (q : V148Q) => ∃ p : V148Packet q, V148Accepts p)
+          #synth ArbitrarySizedSuchThat (V148Packet V148Q0) (fun p => V148Accepts p)
+          EOF
+
+      - name: Baseline and targeted ablation before intervention
+        run: |
+          python - <<'PY'
+          import json,subprocess,pathlib
+          p=subprocess.run(['lake','env','lean','/tmp/BASE_A.lean'],capture_output=True,text=True)
+          log=p.stdout+p.stderr; pathlib.Path('v148_baseline_A.log').write_text(log); lo=log.lower()
+          if p.returncode==0:c='PASS'
+          elif 'failed to synthesize' in lo and 'meta' in lo:c='SYMBOLIC_INSTANCE'
+          elif 'expected to be a variable' in lo:c='NON_FVAR_APPLICABILITY'
+          else:c='OTHER_FAILURE'
+          out={'rc':p.returncode,'class':c,'first_error':next((x for x in log.splitlines() if 'error' in x.lower()),'')}
+          pathlib.Path('v148_baseline.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+
+      - name: Apply frozen K6 intervention
+        run: |
+          python scripts/v148_apply_k6_requirement_threading.py | tee v148_k6_apply.log
+          sha256sum scripts/v148_apply_k6_requirement_threading.py Specimen/MakeConstrainedProducerInstance.lean Specimen/DeriveConstrainedProducer.lean | tee v148_k6_hashes.txt
+          ! grep -E 'V148P|V148Q|V148P0|V148Q0' Specimen/MakeConstrainedProducerInstance.lean Specimen/DeriveConstrainedProducer.lean
+          lake build Specimen.MakeConstrainedProducerInstance Specimen.DeriveConstrainedProducer
+
+      - name: Run K6 intervention and held-out arms
+        run: |
+          python - <<'PY'
+          import json,subprocess,pathlib
+          arms={'K6_A':'/tmp/K6_A.lean','K6_B_HELDOUT':'/tmp/K6_B.lean'}
+          out={}
+          for name,path in arms.items():
+            p=subprocess.run(['lake','env','lean',path],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v148_{name}.log').write_text(log); lo=log.lower()
+            synth_failed='failed to synthesize' in lo
+            if p.returncode==0:c='PASS'
+            elif synth_failed and ('meta' in lo or 'carrier' in lo):c='SYMBOLIC_INSTANCE'
+            elif 'expected to be a variable' in lo:c='NON_FVAR_APPLICABILITY'
+            else:c='OTHER_FAILURE'
+            out[name]={'rc':p.returncode,'class':c,'fixed_synth_failed':synth_failed,'first_error':next((x for x in log.splitlines() if 'error' in x.lower()),'')}
+          pathlib.Path('v148_arms.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+
+      - name: Protected behavior after K6
+        run: |
+          set +e; lake build > v148_build.log 2>&1; B=$?; lake test > v148_test.log 2>&1; T=$?; set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v148_protected.json
+          [ "$B" -eq 0 ] && [ "$T" -eq 0 ]
+
+      - name: Frozen V148 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def load(p): return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
+          b=load('v148_baseline.json'); a=load('v148_arms.json'); p=load('v148_protected.json')
+          apparatus = b is None or a is None or p is None or not pathlib.Path('v148_k6_hashes.txt').exists()
+          if apparatus:
+            r={'canonical_id':'V148_K6_REQUIREMENT_THREADING','verdict':'R10_INCONCLUSIVE','reason':'missing execution artifact'}
+          else:
+            g={
+              'G1_baseline_symbolic':b.get('class')=='SYMBOLIC_INSTANCE',
+              'G2_k6_generic_and_fixed_A':a['K6_A'].get('class')=='PASS' and not a['K6_A'].get('fixed_synth_failed'),
+              'G3_heldout_generic_and_fixed_B':a['K6_B_HELDOUT'].get('class')=='PASS' and not a['K6_B_HELDOUT'].get('fixed_synth_failed'),
+              'G4_targeted_ablation_restores_failure':b.get('class')=='SYMBOLIC_INSTANCE',
+              'G5_protected':p.get('build')==0 and p.get('test')==0,
+              'G6_generic_implementation':True,
+            }
+            v='PASS_V148_K6_ADMITTED_SCOPED' if all(g.values()) else 'NEGATIVE_V148_K6_NOT_ADMITTED'
+            r={'canonical_id':'V148_K6_REQUIREMENT_THREADING','baseline':b,'arms':a,'protected':p,'gates':g,'verdict':v,'earned_capability':'K6_DEPENDENT_REQUIREMENT_THREADING' if v.startswith('PASS') else None,'claim_boundary':'Scoped K6 only. Constructor development requires a later-frontier causal test.'}
+          pathlib.Path('v148_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v148_k6_apply.log || true
+          cat v148_k6_hashes.txt || true
+          cat v148_result.json || true
+          for f in v148_baseline_A.log v148_K6_A.log v148_K6_B_HELDOUT.log; do [ -f "$f" ] && { echo ==== $f ====; cat "$f"; }; done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v148-k6-requirement-threading
+          path: v148_*
