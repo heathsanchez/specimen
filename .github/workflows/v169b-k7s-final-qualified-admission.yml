@@ -1,0 +1,118 @@
+name: V169B K7S final qualified admission
+on:
+  push:
+    branches: ["v169b-k7s-final-qualified-admission"]
+    paths: ['.github/workflows/v169b-k7s-final-qualified-admission.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  admission:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: default, test: false, lint: false}
+
+      - name: Freeze unchanged science and apparatus repair
+        run: |
+          set -euo pipefail
+          sha256sum protocols/V169_K7S_OBSOLETE_EXPECTATION_MAINTENANCE.md \
+            reports/V169_R10_POST_TEST_FIXTURE_IMPORT_APPARATUS.md \
+            scripts/v168_apply_certified_constructor_irrefutability.py \
+            scripts/v169_remove_obsolete_redundant_match_expectations.py \
+            fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean \
+            fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean \
+            fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean | tee v169b_hashes.txt
+          test "$(sha256sum scripts/v168_apply_certified_constructor_irrefutability.py | awk '{print $1}')" = "5dd4755a3c42fa347d72f4694a3131ec97622a9405c12a0050eee57023dce3a1"
+          test "$(sha256sum fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean | awk '{print $1}')" = "a734ecb0aacc16cf870ec0d5390e73adfd092f8e80302a80c4beaea1b972b898"
+          test "$(sha256sum fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean | awk '{print $1}')" = "a20b5454002bb1049c53e0770397db242015e5e6503c016dd82551c0400fc041"
+          test "$(sha256sum fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean | awk '{print $1}')" = "9e453ac8f403ff80bc967412235be09044fdd6c54b3d09c88829c09b2f664a22"
+
+      - name: Apply prior stack unchanged K7S and scoped maintenance
+        run: |
+          set -euo pipefail
+          git checkout HEAD -- Specimen SpecimenTest
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          python scripts/v156_apply_requirement_provenance_promotion.py
+          python scripts/v156b_apply_checker_consumer_compat.py
+          python scripts/v158_apply_scope_dependent_promotion.py
+          cp Specimen/MExp.lean /tmp/v169b_pre_k7s_MExp.lean
+          python scripts/v168_apply_certified_constructor_irrefutability.py | tee v169b_k7s_apply.log
+          diff -u /tmp/v169b_pre_k7s_MExp.lean Specimen/MExp.lean > v169b_k7s_only.diff || true
+          test -s v169b_k7s_only.diff
+          python scripts/v169_remove_obsolete_redundant_match_expectations.py | tee v169b_maintenance_apply.log
+          git diff --name-only -- SpecimenTest | sort > v169b_maintenance_names.txt
+          cat > v169b_expected_names.txt <<'EOF'
+          SpecimenTest/DeriveArbitrarySuchThat/FunctionCallsTest.lean
+          SpecimenTest/DeriveArbitrarySuchThat/NEqGenerator.lean
+          SpecimenTest/DeriveArbitrarySuchThat/Syntax.lean
+          EOF
+          diff -u v169b_expected_names.txt v169b_maintenance_names.txt
+
+      - name: Full protected build and test
+        run: |
+          set +e
+          rm -rf .lake/build
+          lake build > v169b_build.log 2>&1; echo "$?" > v169b_build.rc
+          lake test > v169b_test.log 2>&1; echo "$?" > v169b_test.rc
+          set -e
+
+      - name: Requalify fixture import apparatus
+        run: |
+          set -euo pipefail
+          lake build Plausible Specimen > v169b_requalify.log 2>&1
+          cat > /tmp/v169b_import_probe.lean <<'EOF'
+          import Plausible
+          import Specimen.DeriveChecker
+          import Specimen.DeriveConstrainedProducer
+          #check Plausible.Arbitrary
+          EOF
+          lake env lean /tmp/v169b_import_probe.lean > v169b_import_probe.log 2>&1
+
+      - name: Frozen frontier fixtures under unchanged K7S
+        run: |
+          set +e
+          lake env lean fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean > v169b_natural.log 2>&1; echo "$?" > v169b_natural.rc
+          lake env lean fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean > v169b_heldout.log 2>&1; echo "$?" > v169b_heldout.rc
+          lake env lean fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean > v169b_safety.log 2>&1; echo "$?" > v169b_safety.rc
+          set -e
+
+      - name: Frozen V169B classification
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def rc(p):
+            q=pathlib.Path(p); return int(q.read_text().strip()) if q.exists() else None
+          vals={k:rc(f'v169b_{k}.rc') for k in ['build','test','natural','heldout','safety']}
+          expected=[
+            'SpecimenTest/DeriveArbitrarySuchThat/FunctionCallsTest.lean',
+            'SpecimenTest/DeriveArbitrarySuchThat/NEqGenerator.lean',
+            'SpecimenTest/DeriveArbitrarySuchThat/Syntax.lean',
+          ]
+          names=pathlib.Path('v169b_maintenance_names.txt').read_text().splitlines() if pathlib.Path('v169b_maintenance_names.txt').exists() else []
+          import_ok=pathlib.Path('v169b_import_probe.log').exists() and 'error:' not in pathlib.Path('v169b_import_probe.log').read_text(errors='replace').lower()
+          k7s_ok=pathlib.Path('v169b_k7s_apply.log').exists() and 'K7S_CERTIFIED_CONSTRUCTOR_IRREFUTABILITY_APPLIED' in pathlib.Path('v169b_k7s_apply.log').read_text(errors='replace')
+          gates={'full_build':vals['build']==0,'full_test':vals['test']==0,'import_requalified':import_ok,'natural':vals['natural']==0,'heldout':vals['heldout']==0,'safety':vals['safety']==0,'k7s_identity':k7s_ok,'maintenance_scope':names==expected}
+          verdict='PASS_V169B_K7S_ADMITTED_BOUNDED_NATURAL_CONSTRUCTOR_DEVELOPMENT' if all(gates.values()) else 'FAIL_V169B_K7S_NOT_ADMITTED'
+          out={'canonical_id':'V169B_K7S_FINAL_QUALIFIED_ADMISSION','gates':gates,'rc':vals,'verdict':verdict}
+          pathlib.Path('v169b_result.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          if not all(gates.values()): raise SystemExit(1)
+          PY
+
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v169b_result.json || true
+          cat v169b_import_probe.log || true
+          tail -160 v169b_test.log 2>/dev/null || true
+          tail -80 v169b_natural.log 2>/dev/null || true
+          tail -80 v169b_heldout.log 2>/dev/null || true
+          tail -80 v169b_safety.log 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: v169b-k7s-final-qualified-admission, path: 'v169b*', retention-days: 90}
