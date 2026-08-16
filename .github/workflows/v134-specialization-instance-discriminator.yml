@@ -65,7 +65,7 @@ jobs:
           echo '--- FIXED ---'
           cat v134_fixed.log
           python - <<'PY'
-          import json, pathlib, re, subprocess
+          import json, pathlib, subprocess
           def rc(path):
               p=subprocess.run(['lake','env','lean',path],capture_output=True,text=True)
               return p.returncode,p.stdout+p.stderr
@@ -82,18 +82,23 @@ jobs:
               verdict='PASS_V134_SPECIALIZATION_BEFORE_INSTANCE_SYNTHESIS_DISCRIMINATOR'
           else:
               verdict='INCONCLUSIVE_V134_DIAGNOSTIC_SHAPE'
-          out={
-            'canonical_id':'V134_FIXED_SPECIALIZATION_INSTANCE_DISCRIMINATOR',
-            'generic_rc':grc,'fixed_rc':frc,
-            'generic_parameter_dependent':generic_parameter_dependent,
-            'fixed_symbolic_obligation':fixed_symbolic_obligation,
-            'fixed_mentions_meta':fixed_mentions_meta,
-            'verdict':verdict,
-            'claim_boundary':'Controlled discriminator only. A PASS identifies a barrier coordinate; it does not admit a K6 repair.'
-          }
+          out={'canonical_id':'V134_FIXED_SPECIALIZATION_INSTANCE_DISCRIMINATOR','generic_rc':grc,'fixed_rc':frc,'generic_parameter_dependent':generic_parameter_dependent,'fixed_symbolic_obligation':fixed_symbolic_obligation,'fixed_mentions_meta':fixed_mentions_meta,'verdict':verdict,'claim_boundary':'Controlled discriminator only. A PASS identifies a barrier coordinate; it does not admit a K6 repair.'}
           pathlib.Path('v134_result.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
           print(json.dumps(out,indent=2,sort_keys=True))
           PY
+
+      - name: VERDICT PASS discriminator
+        continue-on-error: true
+        run: python -c "import json; assert json.load(open('v134_result.json'))['verdict']=='PASS_V134_SPECIALIZATION_BEFORE_INSTANCE_SYNTHESIS_DISCRIMINATOR'"
+      - name: VERDICT NULL generic already solved
+        continue-on-error: true
+        run: python -c "import json; assert json.load(open('v134_result.json'))['verdict']=='NULL_V134_GENERIC_ALREADY_SOLVED'"
+      - name: VERDICT NULL specialization eliminates obligation
+        continue-on-error: true
+        run: python -c "import json; assert json.load(open('v134_result.json'))['verdict']=='NULL_V134_SPECIALIZATION_ELIMINATES_OBLIGATION'"
+      - name: VERDICT INCONCLUSIVE diagnostic shape
+        continue-on-error: true
+        run: python -c "import json; assert json.load(open('v134_result.json'))['verdict']=='INCONCLUSIVE_V134_DIAGNOSTIC_SHAPE'"
 
       - uses: actions/upload-artifact@v4
         if: always()
