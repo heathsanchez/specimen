@@ -3,6 +3,8 @@ from pathlib import Path
 # V155 K6_REQUIREMENT_ARRAY_THREADING
 # Generic extension of V153: bind every deduplicated requirement in BOTH the
 # outer generated instance and the inner auxiliary function's own scope.
+# V155A apparatus repair: construct those binders directly in the
+# Term.bracketedBinder parser category required by the splice points.
 
 emit_path = Path("Specimen/MakeConstrainedProducerInstance.lean")
 emit = emit_path.read_text()
@@ -28,12 +30,12 @@ old_quote = '''    -- Produce an instance of the appropriate typeclass containin
           fun $freshSizeIdent => $innerFunctionIdent $fuelLit $freshSizeIdent $freshSizeIdent $outerParams*)
 '''
 new_quote = '''    -- V155: bind every discovered dependent requirement in both scopes.
-    let requiredOuterBinders ← requiredInstances.mapIdxM fun i requiredInstance => do
+    let requiredOuterBinders : TSyntaxArray `Lean.Parser.Term.bracketedBinder ← requiredInstances.mapIdxM fun i requiredInstance => do
       let binderName := mkIdent (Name.mkSimple s!"k6_required_outer_{i}")
-      `(Lean.Elab.Deriving.instBinderF| [$binderName : $requiredInstance])
-    let requiredInnerBinders ← requiredInstances.mapIdxM fun i requiredInstance => do
+      `(Term.bracketedBinder| [$binderName : $requiredInstance])
+    let requiredInnerBinders : TSyntaxArray `Lean.Parser.Term.bracketedBinder ← requiredInstances.mapIdxM fun i requiredInstance => do
       let binderName := mkIdent (Name.mkSimple s!"k6_required_inner_{i}")
-      `(Lean.Elab.Deriving.instBinderF| [$binderName : $requiredInstance])
+      `(Term.bracketedBinder| [$binderName : $requiredInstance])
     `(instance $requiredOuterBinders:bracketedBinder* $arbitraryTypeParamInstances:bracketedBinder* : $producerTypeClass $targetTypeSyntax (fun $targetVarPattern => @$(mkIdent inductiveName) $args*) where
         $producerTypeClassFunction:ident :=
           let rec $innerFunctionIdent:ident $innerParams* $requiredInnerBinders:bracketedBinder* $arbitraryTypeParamInstances:bracketedBinder* : $optionTProducerType :=
