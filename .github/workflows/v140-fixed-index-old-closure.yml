@@ -1,0 +1,198 @@
+name: V140 fixed-index old-closure separator
+
+on:
+  push:
+    branches: ["v140-fixed-index-old-closure"]
+  workflow_dispatch:
+
+jobs:
+  closure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+
+      - name: Apply exact admitted K2 K5 unchanged
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          git diff -- Specimen/DeriveConstrainedProducer.lean | tee v140_admitted.patch
+          if grep -Eq 'V140|V139|V134|P0|Box|Has' v140_admitted.patch; then
+            echo "INVALID_TARGET_SPECIFIC_MUTATION"
+            exit 140
+          fi
+          lake build Specimen.DeriveConstrainedProducer
+
+      - name: Materialize all frozen closure arms before outcomes
+        run: |
+          cat > /tmp/V140Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+
+          structure V140P where
+            Meta : Type
+
+          def V140P0 : V140P := ⟨Unit⟩
+
+          inductive V140Box (p : V140P) : Type where
+          | mk : p.Meta → V140Box p
+
+          inductive V140Has {p : V140P} : V140Box p → Prop where
+          | mk (x : p.Meta) : V140Has (V140Box.mk x)
+          EOF
+
+          cp /tmp/V140Common.lean /tmp/V140C0.lean
+          cat >> /tmp/V140C0.lean <<'EOF'
+
+          derive_mutual (fun (_ : Unit) => ∃ b : V140Box V140P0, V140Has b)
+          EOF
+
+          cp /tmp/V140Common.lean /tmp/V140C1.lean
+          cat >> /tmp/V140C1.lean <<'EOF'
+
+          section
+          variable (p : V140P)
+          derive_mutual (fun (_ : Unit) => ∃ b : V140Box p, V140Has b)
+          end
+          EOF
+
+          cp /tmp/V140Common.lean /tmp/V140C2.lean
+          cat >> /tmp/V140C2.lean <<'EOF'
+
+          section
+          variable (p : V140P)
+          variable [Plausible.Arbitrary p.Meta]
+          derive_mutual (fun (_ : Unit) => ∃ b : V140Box p, V140Has b)
+          end
+          EOF
+
+          cp /tmp/V140Common.lean /tmp/V140C3.lean
+          cat >> /tmp/V140C3.lean <<'EOF'
+
+          section
+          variable (p : V140P)
+          variable [Plausible.Arbitrary p.Meta]
+          derive_mutual (fun (_ : Unit) => ∃ b : V140Box p, V140Has b)
+          end
+
+          #synth ArbitrarySizedSuchThat (V140Box V140P0) (fun b => V140Has b)
+          EOF
+
+      - name: Execute bounded closure arms and classify
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, pathlib, subprocess
+          arms = {
+            'C0_DIRECT_CONST':'/tmp/V140C0.lean',
+            'C1_PARAM_NO_INSTANCE':'/tmp/V140C1.lean',
+            'C2_PARAM_WITH_INSTANCE':'/tmp/V140C2.lean',
+            'C3_FIXED_SPECIALIZATION':'/tmp/V140C3.lean',
+          }
+          rows = {}
+          for name,path in arms.items():
+              p = subprocess.run(['lake','env','lean',path], capture_output=True, text=True)
+              log = p.stdout + p.stderr
+              pathlib.Path(f'v140_{name.lower()}.log').write_text(log)
+              low = log.lower()
+              if p.returncode == 0:
+                  cls = 'PASS'
+              elif 'expected to be a variable' in low:
+                  cls = 'NON_FVAR_APPLICABILITY'
+              elif (('failed to synthesize' in low or 'arbitrary' in low or 'synthinstance' in low) and 'meta' in low):
+                  cls = 'SYMBOLIC_INSTANCE'
+              elif name == 'C3_FIXED_SPECIALIZATION' and ('unknown identifier' in low or 'failed to synthesize' in low):
+                  cls = 'NAME_DISCOVERY'
+              else:
+                  cls = 'OTHER_FAILURE'
+              rows[name] = {
+                'rc': p.returncode,
+                'class': cls,
+                'first_diagnostic': next((x for x in log.splitlines() if 'error' in x.lower()), '')
+              }
+          out = {'arms': rows}
+          pathlib.Path('v140_arms.json').write_text(json.dumps(out, indent=2, sort_keys=True)+'\n')
+          print(json.dumps(out, indent=2, sort_keys=True))
+          PY
+
+      - name: Full protected K2 K5 suite
+        id: protected
+        shell: bash
+        run: |
+          set +e
+          lake build > v140_protected_build.log 2>&1
+          BUILD=$?
+          lake test > v140_protected_test.log 2>&1
+          TEST=$?
+          set -e
+          echo "BUILD=$BUILD TEST=$TEST"
+          cat v140_protected_build.log
+          cat v140_protected_test.log
+          printf '{"build":%s,"test":%s}\n' "$BUILD" "$TEST" > v140_protected.json
+          if [ "$BUILD" -ne 0 ] || [ "$TEST" -ne 0 ]; then
+            echo "R10_PROTECTED_SUITE_FAILURE"
+            exit 141
+          fi
+
+      - name: Frozen verdict
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          arms = json.loads(pathlib.Path('v140_arms.json').read_text())['arms'] if pathlib.Path('v140_arms.json').exists() else {}
+          protected = json.loads(pathlib.Path('v140_protected.json').read_text()) if pathlib.Path('v140_protected.json').exists() else None
+          cls=lambda k: arms.get(k,{}).get('class')
+          gates={
+            'B1_exact_k2_k5_module_build': bool(arms),
+            'B2_direct_replays_non_fvar': cls('C0_DIRECT_CONST')=='NON_FVAR_APPLICABILITY',
+            'B3_parameterization_reaches_symbolic_instance': cls('C1_PARAM_NO_INSTANCE')=='SYMBOLIC_INSTANCE',
+            'B4_parameterized_with_existing_instance_passes': cls('C2_PARAM_WITH_INSTANCE')=='PASS',
+            'B5_fixed_specialization_passes': cls('C3_FIXED_SPECIALIZATION')=='PASS',
+            'B6_protected_suite_green': protected is not None and protected.get('build')==0 and protected.get('test')==0,
+          }
+          if protected is None or protected.get('build') != 0 or protected.get('test') != 0:
+              verdict='R10_INCONCLUSIVE'
+          elif all(gates.values()):
+              verdict='REJECT_K6_OLD_CLOSURE_SUFFICES'
+          elif all(gates[k] for k in ['B1_exact_k2_k5_module_build','B2_direct_replays_non_fvar','B3_parameterization_reaches_symbolic_instance','B4_parameterized_with_existing_instance_passes']) and cls('C3_FIXED_SPECIALIZATION')=='NAME_DISCOVERY':
+              verdict='OLD_CLOSURE_PARTIAL_SPECIALIZATION_UNPROVEN'
+          elif all(gates[k] for k in ['B1_exact_k2_k5_module_build','B2_direct_replays_non_fvar','B3_parameterization_reaches_symbolic_instance']):
+              verdict='PASS_V140_OLD_CLOSURE_EXHAUSTED_FOR_FROZEN_FAMILY'
+          else:
+              verdict='INCONCLUSIVE_V140_CONTROL_FAILURE'
+          out={
+            'canonical_id':'V140_FIXED_INDEX_OLD_CLOSURE_SEPARATOR',
+            'protocol':'research/V140_FIXED_INDEX_OLD_CLOSURE_PRECOMMIT.md',
+            'arms':arms,
+            'protected':protected,
+            'gates':gates,
+            'verdict':verdict,
+            'claim_boundary':'Closure result only. No K6, constructor development, recursive development, or open-ended-development claim.'
+          }
+          pathlib.Path('v140_result.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+
+      - name: Show arm diagnostics
+        if: always()
+        run: |
+          for f in v140_c*.log; do [ -e "$f" ] && { echo "===== $f ====="; cat "$f"; }; done
+          [ -e v140_result.json ] && cat v140_result.json || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v140-fixed-index-old-closure
+          path: |
+            v140_result.json
+            v140_arms.json
+            v140_protected.json
+            v140_admitted.patch
+            v140_c*.log
+            v140_protected_*.log
