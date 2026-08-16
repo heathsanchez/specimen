@@ -1,0 +1,103 @@
+name: V161 structure projection layer separator
+
+on:
+  push:
+    branches: ["v161-structure-projection-layer-separator"]
+    paths:
+      - '.github/workflows/v161-structure-projection-layer-separator.yml'
+      - 'experiments/V161_STRUCTURE_PROJECTION_LAYER_SEPARATOR_PREREG.md'
+  workflow_dispatch:
+
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact admitted K2 K5 only
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Freeze D0 D1 C fixtures
+        run: |
+          cat > /tmp/V161D0.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V161P0 where A : Type
+          inductive V161R0 (p : V161P0) : Option p.A → Prop where
+            | none : V161R0 p none
+          derive_generator (fun (p : V161P0) => ∃ x : Option p.A, V161R0 p x)
+          EOF
+          cat > /tmp/V161D1.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V161P1 where A : Type
+          inductive V161R1 (p : V161P1) : Option p.A → Prop where
+            | some (a : p.A) : V161R1 p (some a)
+          derive_generator (fun (p : V161P1) => ∃ x : Option p.A, V161R1 p x)
+          EOF
+          cat > /tmp/V161C.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          inductive V161RC (α : Type) : Option α → Prop where
+            | some (a : α) : V161RC α (some a)
+          derive_generator (fun (α : Type) => ∃ x : Option α, V161RC α x)
+          EOF
+      - name: Execute frozen separator
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          out={}
+          for name in ['D0','D1','C']:
+            p=subprocess.run(['lake','env','lean',f'/tmp/V161{name}.lean'],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v161_{name}.log').write_text(log); lo=log.lower()
+            if p.returncode==0:c='PASS'
+            elif 'unknown free variable' in lo:c='FREE_FVAR'
+            elif 'failed to synthesize' in lo:c='SYNTH_FAILURE'
+            elif 'expected to be a variable' in lo:c='NON_FVAR_APPLICABILITY'
+            elif 'unable to derive producer schedule' in lo or 'cannot derive constrained producer' in lo:c='SCHEDULE_FAILURE'
+            else:c='OTHER_FAILURE'
+            out[name]={'rc':p.returncode,'class':c,'tail':log[-10000:]}
+          pathlib.Path('v161_arms.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Protected suite
+        continue-on-error: true
+        run: |
+          set +e; lake build > v161_build.log 2>&1; B=$?; lake test > v161_test.log 2>&1; T=$?; set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v161_protected.json
+          exit 0
+      - name: Frozen V161 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def load(p): return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
+          a=load('v161_arms.json'); p=load('v161_protected.json')
+          if a is None or p is None:v='R10_INCONCLUSIVE'
+          elif p.get('build')!=0 or p.get('test')!=0:v='R10_PROTECTED_FAILURE'
+          else:
+            d0=a['D0']['class']; d1=a['D1']['class']; c=a['C']['class']
+            if d0=='FREE_FVAR' and d1=='FREE_FVAR' and c!='FREE_FVAR':v='PASS_V161_DEPENDENT_TYPE_RECONSTRUCTION_IMPLICATED'
+            elif d0!='FREE_FVAR' and d1=='FREE_FVAR' and c!='FREE_FVAR':v='PASS_V161_LEAF_GENERATION_PATH_IMPLICATED'
+            else:v='V161_BROADER_PROJECTION_RESIDUAL'
+          r={'canonical_id':'V161_STRUCTURE_PROJECTION_LAYER_SEPARATOR','arms':None if a is None else {k:x['class'] for k,x in a.items()},'protected':p,'verdict':v,'claim_boundary':'Mechanism localization only; no repair admitted.'}
+          pathlib.Path('v161_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v161_result.json || true
+          for f in v161_D0.log v161_D1.log v161_C.log; do [ -f "$f" ] && { echo ==== $f ====; cat "$f"; }; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v161-structure-projection-layer-separator
+          path: v161_*
