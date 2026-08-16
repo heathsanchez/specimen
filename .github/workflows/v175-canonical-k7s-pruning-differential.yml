@@ -1,0 +1,86 @@
+name: V175 canonical K7S pruning differential
+on:
+  push:
+    branches: ["v175-canonical-k7s-pruning-differential"]
+    paths: ['.github/workflows/v175-canonical-k7s-pruning-differential.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: false, test: false, lint: false}
+      - name: Freeze apparatus
+        run: |
+          set -euo pipefail
+          lake --version
+          sha256sum protocols/V175_CANONICAL_K7S_PRUNING_DIFFERENTIAL.md \
+            scripts/v120_apply_binder_aware_fixed_parameter.py scripts/v132_apply_output_dependent_input_determined.py \
+            scripts/v156_apply_requirement_provenance_promotion.py scripts/v156b_apply_checker_consumer_compat.py \
+            scripts/v158_apply_scope_dependent_promotion.py scripts/v168_apply_certified_constructor_irrefutability.py \
+            scripts/v169_remove_obsolete_redundant_match_expectations.py \
+            scripts/v173_apply_standalone_producer_typeparam_pruning.py \
+            fixtures/V170_ISSUE19_PARAMETER_OVERCONSTRAINT.lean | tee v175_hashes.txt
+      - name: Define helpers
+        run: |
+          cat > /tmp/v175.sh <<'SH'
+          set -euo pipefail
+          prior_prod() {
+            python scripts/v120_apply_binder_aware_fixed_parameter.py
+            python scripts/v132_apply_output_dependent_input_determined.py
+            python scripts/v156_apply_requirement_provenance_promotion.py
+            python scripts/v156b_apply_checker_consumer_compat.py
+            python scripts/v158_apply_scope_dependent_promotion.py
+            python scripts/v168_apply_certified_constructor_irrefutability.py
+          }
+          maintenance() { python scripts/v169_remove_obsolete_redundant_match_expectations.py; }
+          clean() { git checkout HEAD -- Specimen SpecimenTest; rm -rf .lake/build; }
+          run_suite() { local p="$1"; set +e; lake test > "$p.log" 2>&1; echo $? > "$p.rc"; set -e; grep '^[-] SpecimenTest\.' "$p.log" | sed 's/^- //' | sort -u > "$p.failures" || true; }
+          probe() { local f="$1" p="$2"; set +e; lake env lean "$f" > "$p.log" 2>&1; echo $? > "$p.rc"; set -e; }
+          SH
+      - name: Arm A canonical K7S baseline
+        run: |
+          source /tmp/v175.sh
+          clean; prior_prod > v175_A_prod.log 2>&1; maintenance > v175_A_maint.log 2>&1
+          lake build Plausible Specimen > v175_A_build.log 2>&1
+          run_suite v175_A_test
+      - name: Arm B canonical K7S plus scoped pruning
+        run: |
+          source /tmp/v175.sh
+          clean; prior_prod > v175_B_prod.log 2>&1; maintenance > v175_B_maint.log 2>&1
+          python scripts/v173_apply_standalone_producer_typeparam_pruning.py | tee v175_B_prune.log
+          grep -q V173_STANDALONE_PRODUCER_TYPEPARAM_PRUNING_APPLIED v175_B_prune.log
+          lake build Plausible Specimen > v175_B_build.log 2>&1
+          probe fixtures/V170_ISSUE19_PARAMETER_OVERCONSTRAINT.lean v175_B_natural
+          run_suite v175_B_test
+      - name: Frozen V175 classification
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def rc(p):
+            x=pathlib.Path(p); return int(x.read_text().strip()) if x.exists() else None
+          def fs(p):
+            x=pathlib.Path(p); return [s for s in x.read_text().splitlines() if s.strip()] if x.exists() else None
+          ar,br,nr=rc('v175_A_test.rc'),rc('v175_B_test.rc'),rc('v175_B_natural.rc')
+          A,B=fs('v175_A_test.failures'),fs('v175_B_test.failures')
+          apparatus=any(x is None for x in [ar,br,nr,A,B])
+          added=sorted(set(B or [])-set(A or [])); removed=sorted(set(A or [])-set(B or []))
+          if apparatus: verdict='R10_V175_INCONCLUSIVE'
+          elif ar==0 and br==0 and nr==0: verdict='PASS_V175_SCOPED_PRUNING_CANONICALLY_PROTECTED'
+          elif ar==0 and br!=0: verdict='SEPARATOR_V175_PRUNING_ADDS_GENUINE_FAILURE'
+          else: verdict='NEGATIVE_V175_CANONICAL_BASELINE_NOT_CLEAN'
+          out={'canonical_id':'V175_CANONICAL_K7S_PRUNING_DIFFERENTIAL','apparatus':apparatus,'A_rc':ar,'B_rc':br,'B_natural_rc':nr,'A_failures':A,'B_failures':B,'added':added,'removed':removed,'verdict':verdict}
+          pathlib.Path('v175_result.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v175_result.json || true
+          tail -140 v175_B_test.log 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: v175-canonical-k7s-pruning-differential, path: 'v175*', retention-days: 90}
