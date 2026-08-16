@@ -1,0 +1,76 @@
+name: V164B upstream issue9 qualified reproduction
+on:
+  push:
+    branches: ["v164b-upstream-issue9-qualified-reproduction"]
+    paths: ['.github/workflows/v164b-upstream-issue9-qualified-reproduction.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: false, test: false, lint: false}
+      - name: Freeze unchanged upstream science
+        run: |
+          sha256sum protocols/V164_UPSTREAM_ISSUE9_REPRO_QUALIFICATION.md reports/V164_R10_NO_LEAN_TOOLCHAIN.md fixtures/V162_UPSTREAM_ISSUE9_REPRO.lean | tee v164b_local_hashes.txt
+          test "$(sha256sum fixtures/V162_UPSTREAM_ISSUE9_REPRO.lean | awk '{print $1}')" = "1e637c0269bb2c215dc71847df4c51207a76802350ad9eeead8201600ee62a51"
+          lake --version
+      - name: Clone frozen upstream
+        run: |
+          git clone https://github.com/strata-org/specimen.git upstream-specimen
+          cd upstream-specimen
+          git checkout c991edb5e2a7d836bd4e42cb3a02897e0c2ea788
+          test "$(git rev-parse HEAD)" = "c991edb5e2a7d836bd4e42cb3a02897e0c2ea788"
+          cp ../fixtures/V162_UPSTREAM_ISSUE9_REPRO.lean V164Issue9.lean
+          sha256sum V164Issue9.lean > ../v164b_upstream_fixture_hash.txt
+      - name: Build and qualify upstream apparatus
+        run: |
+          cd upstream-specimen
+          lake build Plausible Specimen
+          cat > /tmp/v164b_import_probe.lean <<'EOF'
+          import Plausible
+          import Specimen.DeriveConstrainedProducer
+          import Specimen.DeriveChecker
+          #check Plausible.Arbitrary
+          EOF
+          lake env lean /tmp/v164b_import_probe.lean | tee ../v164b_import_probe.log
+      - name: Execute exact upstream issue task
+        run: |
+          cd upstream-specimen
+          set +e
+          /usr/bin/time -f '%e' -o ../v164b_wall.txt timeout 120s lake env lean V164Issue9.lean > ../v164b.log 2>&1
+          RC=$?
+          set -e
+          echo "$RC" > ../v164b_rc.txt
+      - name: Frozen classification
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          rc=int(pathlib.Path('v164b_rc.txt').read_text().strip()) if pathlib.Path('v164b_rc.txt').exists() else None
+          log=pathlib.Path('v164b.log').read_text(errors='replace') if pathlib.Path('v164b.log').exists() else ''
+          wall=float(pathlib.Path('v164b_wall.txt').read_text().strip()) if pathlib.Path('v164b_wall.txt').exists() else None
+          lo=log.lower()
+          apparatus=(rc is None or any(x in lo for x in ['unknown module prefix','object file']) or not pathlib.Path('v164b_import_probe.log').exists())
+          semantic=any(x in lo for x in ['failed to synthesize instance of type class','failed to synthesize\n  decopt','failed to synthesize\n  decidable'])
+          if apparatus: verdict='R10_V164B_INCONCLUSIVE'
+          elif semantic: verdict='UPSTREAM_SEMANTIC_PREREQUISITE_FAILURE_V164B'
+          elif rc==124: verdict='REPRODUCED_PERFORMANCE_FRONTIER_V164B_TIMEOUT'
+          elif rc==0 and wall is not None and wall < 15: verdict='PASS_FAST_V164B'
+          elif rc==0: verdict='REPRODUCED_PERFORMANCE_FRONTIER_V164B_SLOW'
+          else: verdict='INCONCLUSIVE_V164B_OTHER_FAILURE'
+          out={'canonical_id':'V164B_UPSTREAM_ISSUE9_REPRO_QUALIFICATION','upstream_sha':'c991edb5e2a7d836bd4e42cb3a02897e0c2ea788','rc':rc,'wall_seconds':wall,'apparatus':apparatus,'semantic_prerequisite_failure':semantic,'verdict':verdict,'log_tail':log[-8000:]}
+          pathlib.Path('v164b_result.json').write_text(json.dumps(out,indent=2)+'\n')
+          print(json.dumps(out,indent=2))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v164b_result.json || true
+          tail -180 v164b.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: v164b-upstream-issue9-qualified-reproduction, path: 'v164b_*', retention-days: 90}
