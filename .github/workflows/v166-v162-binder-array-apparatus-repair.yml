@@ -1,0 +1,141 @@
+name: V166 V162 binder array apparatus repair
+
+on:
+  push:
+    branches: ["v166-v162-binder-array-apparatus-repair"]
+    paths:
+      - '.github/workflows/v166-v162-binder-array-apparatus-repair.yml'
+      - 'experiments/V166_V162_BINDER_ARRAY_APPARATUS_REPAIR_PREREG.md'
+      - 'scripts/v162_apply_finite_requirement_threading.py'
+  workflow_dispatch:
+
+jobs:
+  finite-threading:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact admitted K2 K5 and V156
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          python scripts/v156_apply_requirement_aware_deriver.py
+          lake build Specimen.MakeConstrainedProducerInstance Specimen.DeriveConstrainedProducer
+      - name: Freeze exact V162 admission fixtures
+        run: |
+          cat > /tmp/V166P2Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V166P2 where
+            A : Type
+            B : Type
+          abbrev V166P2A : V166P2 := ⟨Unit, Unit⟩
+          inductive V166Box2 (p : V166P2) where | mk : p.A → p.B → V166Box2 p
+          inductive V166Has2 (p : V166P2) : V166Box2 p → Prop where | mk (a : p.A) (b : p.B) : V166Has2 p (.mk a b)
+          EOF
+          cp /tmp/V166P2Common.lean /tmp/V166_A0.lean
+          echo 'derive_generator_with_requirements (fun (p : V166P2) => ∃ b : V166Box2 p, V166Has2 p b)' >> /tmp/V166_A0.lean
+          cp /tmp/V166P2Common.lean /tmp/V166_I1.lean
+          cat >> /tmp/V166_I1.lean <<'EOF'
+          derive_generator_with_requirements (fun (p : V166P2) => ∃ b : V166Box2 p, V166Has2 p b)
+          #synth ArbitrarySizedSuchThat (V166Box2 V166P2A) (fun b => V166Has2 V166P2A b)
+          EOF
+          cp /tmp/V166P2Common.lean /tmp/V166_LEGACY.lean
+          echo 'derive_generator (fun (p : V166P2) => ∃ b : V166Box2 p, V166Has2 p b)' >> /tmp/V166_LEGACY.lean
+          cat > /tmp/V166_I2.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V166Q3 where
+            X : Type
+            Y : Type
+            Z : Type
+          abbrev V166Q3A : V166Q3 := ⟨Unit, Unit, Unit⟩
+          inductive V166Crate3 (q : V166Q3) where | pack : q.X → q.Y → q.Z → V166Crate3 q
+          inductive V166Good3 (q : V166Q3) : V166Crate3 q → Prop where | pack (x : q.X) (y : q.Y) (z : q.Z) : V166Good3 q (.pack x y z)
+          derive_generator_with_requirements (fun (q : V166Q3) => ∃ c : V166Crate3 q, V166Good3 q c)
+          #synth ArbitrarySizedSuchThat (V166Crate3 V166Q3A) (fun c => V166Good3 V166Q3A c)
+          EOF
+          cat > /tmp/V166_I3.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V166R1 where T : Type
+          abbrev V166R1A : V166R1 := ⟨Unit⟩
+          inductive V166Cell1 (r : V166R1) where | put : r.T → V166Cell1 r
+          inductive V166Ok1 (r : V166R1) : V166Cell1 r → Prop where | put (x : r.T) : V166Ok1 r (.put x)
+          derive_generator_with_requirements (fun (r : V166R1) => ∃ c : V166Cell1 r, V166Ok1 r c)
+          #synth ArbitrarySizedSuchThat (V166Cell1 V166R1A) (fun c => V166Ok1 V166R1A c)
+          EOF
+      - name: Reproduce exact V156 arity ablation
+        run: |
+          python - <<'PY'
+          import json,pathlib,re,subprocess
+          p=subprocess.run(['lake','env','lean','/tmp/V166_A0.lean'],capture_output=True,text=True)
+          log=p.stdout+p.stderr; pathlib.Path('v166_A0.log').write_text(log); lo=log.lower()
+          m=re.search(r'discovered\s+(\d+)',lo)
+          c='PASS' if p.returncode==0 else ('ARITY_FAILURE' if 'requirement-aware deriver currently supports' in lo else 'OTHER_FAILURE')
+          pathlib.Path('v166_ablation.json').write_text(json.dumps({'rc':p.returncode,'class':c,'discovered_count':None if m is None else int(m.group(1)),'tail':log[-10000:]},indent=2)+'\n')
+          PY
+      - name: Apply repaired finite threading candidate
+        run: |
+          python scripts/v162_apply_finite_requirement_threading.py > v166_apply.log
+          cat v166_apply.log
+          grep -q 'V166_V162_BINDER_ARRAY_TYPING_REPAIRED' v166_apply.log
+          git diff -- Specimen/MakeConstrainedProducerInstance.lean Specimen/DeriveConstrainedProducer.lean > v166_candidate.patch
+          test -s v166_candidate.patch
+          if grep -Eq 'V166P2|V166Q3|V166R1' v166_candidate.patch; then exit 166; fi
+          lake build Specimen.MakeConstrainedProducerInstance Specimen.DeriveConstrainedProducer
+      - name: Run frozen admission arms
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          out={}
+          for n in ['I1','I2','I3','LEGACY']:
+            p=subprocess.run(['lake','env','lean',f'/tmp/V166_{n}.lean'],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v166_{n}.log').write_text(log); lo=log.lower()
+            if p.returncode==0:c='PASS'
+            elif 'failed to synthesize' in lo:c='SYNTH_FAILURE'
+            elif 'requirement-aware deriver currently supports' in lo:c='ARITY_FAILURE'
+            else:c='OTHER_FAILURE'
+            out[n]={'rc':p.returncode,'class':c,'tail':log[-14000:]}
+          pathlib.Path('v166_arms.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Protected suite
+        continue-on-error: true
+        run: |
+          set +e; lake build > v166_build.log 2>&1; B=$?; lake test > v166_test.log 2>&1; T=$?; set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v166_protected.json
+          exit 0
+      - name: Frozen V166 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def load(p): return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
+          a=load('v166_ablation.json'); i=load('v166_arms.json'); p=load('v166_protected.json')
+          applied=pathlib.Path('v166_candidate.patch').exists() and pathlib.Path('v166_candidate.patch').stat().st_size>0 and pathlib.Path('v166_apply.log').exists() and 'V166_V162_BINDER_ARRAY_TYPING_REPAIRED' in pathlib.Path('v166_apply.log').read_text()
+          if a is None or i is None or p is None or not applied:v='R10_CANDIDATE_NOT_APPLIED'
+          elif a['class']!='ARITY_FAILURE' or a['discovered_count']!=2:v='R10_ABLATION_NOT_REPRODUCED'
+          elif p.get('build')!=0 or p.get('test')!=0:v='R10_PROTECTED_FAILURE'
+          elif i['I1']['class']=='PASS' and i['I2']['class']=='PASS' and i['I3']['class']=='PASS' and i['LEGACY']['class']!='PASS':v='PASS_V166_FINITE_REQUIREMENT_THREADING_ADMITTED_SCOPED'
+          else:v='NEGATIVE_V166_FINITE_THREADING_DOES_NOT_CLOSE_PURE_MULTIPLICITY'
+          r={'canonical_id':'V166_V162_BINDER_ARRAY_APPARATUS_REPAIR','candidate_applied':applied,'ablation':a,'arms':None if i is None else {k:x['class'] for k,x in i.items()},'protected':p,'verdict':v,'claim_boundary':'Finite transport of already-discovered requirements only; no discovery, classification, dependency discharge, or new Lean expressivity.'}
+          pathlib.Path('v166_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v166_result.json || true
+          cat v166_apply.log || true
+          for f in v166_A0.log v166_I1.log v166_I2.log v166_I3.log v166_LEGACY.log; do [ -f "$f" ] && { echo ==== $f ====; cat "$f"; }; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v166-v162-binder-array-apparatus-repair
+          path: v166_*
