@@ -1,0 +1,211 @@
+name: V157 recursive dependent frontier
+
+on:
+  push:
+    branches: ["v157-recursive-dependent-frontier"]
+    paths:
+      - '.github/workflows/v157-recursive-dependent-frontier.yml'
+      - 'experiments/V157_RECURSIVE_DEPENDENT_FRONTIER_PREREG.md'
+  workflow_dispatch:
+
+jobs:
+  frontier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+
+      - name: Apply exact admitted K2 K5 only
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+
+      - name: Freeze V157 recursive fixtures
+        run: |
+          cat > /tmp/V157F1Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+
+          structure V157Schema where Atom : Type
+          def V157Schema0 : V157Schema := ⟨Nat⟩
+
+          inductive V157Seq (s : V157Schema) : Nat → List s.Atom → Prop where
+            | nil : V157Seq s 0 []
+            | cons (x : s.Atom) {n : Nat} {xs : List s.Atom} :
+                V157Seq s n xs → V157Seq s (Nat.succ n) (x :: xs)
+          EOF
+
+          cat > /tmp/V157F2Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+
+          structure V157World where Label : Type
+          def V157World0 : V157World := ⟨Bool⟩
+
+          inductive V157Tree (α : Type) where
+            | leaf : α → V157Tree α
+            | fork : V157Tree α → V157Tree α → V157Tree α
+
+          inductive V157Full (w : V157World) : Nat → V157Tree w.Label → Prop where
+            | leaf (x : w.Label) : V157Full w 0 (.leaf x)
+            | fork {n : Nat} {l r : V157Tree w.Label} :
+                V157Full w n l → V157Full w n r →
+                V157Full w (Nat.succ n) (.fork l r)
+          EOF
+
+          cp /tmp/V157F1Common.lean /tmp/V157_B1.lean
+          cat >> /tmp/V157_B1.lean <<'EOF'
+          derive_generator (fun (s : V157Schema) (n : Nat) => ∃ xs : List s.Atom, V157Seq s n xs)
+          EOF
+
+          cp /tmp/V157F2Common.lean /tmp/V157_B2.lean
+          cat >> /tmp/V157_B2.lean <<'EOF'
+          derive_generator (fun (w : V157World) (n : Nat) => ∃ t : V157Tree w.Label, V157Full w n t)
+          EOF
+
+          cp /tmp/V157F1Common.lean /tmp/V157_I1.lean
+          cat >> /tmp/V157_I1.lean <<'EOF'
+          instance : Plausible.Arbitrary V157Schema0.Atom := by
+            change Plausible.Arbitrary Nat
+            infer_instance
+          derive_generator_with_requirements (fun (s : V157Schema) (n : Nat) => ∃ xs : List s.Atom, V157Seq s n xs)
+          #synth ArbitrarySizedSuchThat (List V157Schema0.Atom) (fun xs => V157Seq V157Schema0 2 xs)
+          EOF
+
+          cp /tmp/V157F2Common.lean /tmp/V157_I2.lean
+          cat >> /tmp/V157_I2.lean <<'EOF'
+          instance : Plausible.Arbitrary V157World0.Label := by
+            change Plausible.Arbitrary Bool
+            infer_instance
+          derive_generator_with_requirements (fun (w : V157World) (n : Nat) => ∃ t : V157Tree w.Label, V157Full w n t)
+          #synth ArbitrarySizedSuchThat (V157Tree V157World0.Label) (fun t => V157Full V157World0 2 t)
+          EOF
+
+      - name: Run frozen legacy baselines
+        run: |
+          python - <<'PY'
+          import json, pathlib, subprocess
+          out={}
+          for name,path in {'B1':'/tmp/V157_B1.lean','B2':'/tmp/V157_B2.lean'}.items():
+            p=subprocess.run(['lake','env','lean',path],capture_output=True,text=True)
+            log=p.stdout+p.stderr
+            pathlib.Path(f'v157_{name}.log').write_text(log)
+            lo=log.lower()
+            if p.returncode==0:
+              c='PASS'
+            elif 'failed to synthesize' in lo and ('atom' in lo or 'label' in lo or 'arbitrary' in lo):
+              c='DEPENDENT_SYMBOLIC_INSTANCE'
+            elif 'unable to derive producer schedule' in lo or 'cannot derive constrained producer' in lo:
+              c='SCHEDULE_FAILURE'
+            else:
+              c='OTHER_FAILURE'
+            out[name]={'rc':p.returncode,'class':c,'tail':log[-10000:]}
+          pathlib.Path('v157_baseline.json').write_text(json.dumps(out,indent=2)+'\n')
+          print(json.dumps(out,indent=2))
+          PY
+
+      - name: Apply exact frozen V156 operator
+        run: |
+          python scripts/v156_apply_requirement_aware_deriver.py | tee v157_v156_apply.log
+          git diff -- Specimen/MakeConstrainedProducerInstance.lean Specimen/DeriveConstrainedProducer.lean > v157_v156_operator.patch
+          if grep -Eq 'V157Schema|V157Seq|V157World|V157Tree|V157Full' v157_v156_operator.patch; then
+            echo V157-fixture-specific-token-leak
+            exit 157
+          fi
+          lake build Specimen.MakeConstrainedProducerInstance Specimen.DeriveConstrainedProducer
+
+      - name: Run frozen V156 frontier arms
+        run: |
+          python - <<'PY'
+          import json, pathlib, subprocess
+          out={}
+          for name,path in {'I1':'/tmp/V157_I1.lean','I2':'/tmp/V157_I2.lean'}.items():
+            p=subprocess.run(['lake','env','lean',path],capture_output=True,text=True)
+            log=p.stdout+p.stderr
+            pathlib.Path(f'v157_{name}.log').write_text(log)
+            lo=log.lower()
+            if p.returncode==0:
+              c='PASS'
+            elif 'requirement-aware deriver currently supports' in lo:
+              c='REQUIREMENT_ARITY_FAILURE'
+            elif 'failed to synthesize' in lo:
+              c='SYNTH_FAILURE'
+            elif 'unable to derive producer schedule' in lo or 'cannot derive constrained producer' in lo:
+              c='SCHEDULE_FAILURE'
+            else:
+              c='OTHER_FAILURE'
+            out[name]={'rc':p.returncode,'class':c,'tail':log[-12000:]}
+          pathlib.Path('v157_intervention.json').write_text(json.dumps(out,indent=2)+'\n')
+          print(json.dumps(out,indent=2))
+          PY
+
+      - name: Protected suite
+        continue-on-error: true
+        run: |
+          set +e
+          lake build > v157_build.log 2>&1; B=$?
+          lake test > v157_test.log 2>&1; T=$?
+          set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v157_protected.json
+          exit 0
+
+      - name: Frozen V157 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          def load(p):
+            return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
+          b=load('v157_baseline.json')
+          i=load('v157_intervention.json')
+          p=load('v157_protected.json')
+          patch=pathlib.Path('v157_v156_operator.patch')
+          if b is None or i is None or p is None or not patch.exists():
+            r={'canonical_id':'V157_RECURSIVE_DEPENDENT_FRONTIER','verdict':'R10_INCONCLUSIVE'}
+          else:
+            if b['B1']['class']=='PASS' or b['B2']['class']=='PASS':
+              v='REJECT_V157_PRIOR_OPERATOR_ALREADY_SUFFICES'
+            else:
+              g={
+                'G1_B1_dependent_residual':b['B1']['class']=='DEPENDENT_SYMBOLIC_INSTANCE',
+                'G2_B2_dependent_residual':b['B2']['class']=='DEPENDENT_SYMBOLIC_INSTANCE',
+                'G3_I1_pass':i['I1']['class']=='PASS',
+                'G4_I2_pass':i['I2']['class']=='PASS',
+                'G5_no_fixture_leak':not any(x in patch.read_text() for x in ['V157Schema','V157Seq','V157World','V157Tree','V157Full']),
+                'G6_protected_build':p.get('build')==0,
+                'G7_protected_test':p.get('test')==0,
+              }
+              v='PASS_V157_RECURSIVE_FRONTIER_CAUSALLY_EXTENDED' if all(g.values()) else 'NEGATIVE_V157_V156_DOES_NOT_TRANSFER'
+            r={
+              'canonical_id':'V157_RECURSIVE_DEPENDENT_FRONTIER',
+              'baseline':{k:x['class'] for k,x in b.items()},
+              'intervention':{k:x['class'] for k,x in i.items()},
+              'protected':p,
+              'verdict':v,
+              'claim_boundary':'Constructed recursive frontier causal extension only; no natural/autonomous repair-language-growth claim.'
+            }
+            if 'g' in locals(): r['gates']=g
+          pathlib.Path('v157_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v157_result.json || true
+          for f in v157_B1.log v157_B2.log v157_I1.log v157_I2.log v157_test.log; do
+            [ -f "$f" ] && { echo ==== $f ====; tail -n 220 "$f"; }
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v157-recursive-dependent-frontier
+          path: v157_*
