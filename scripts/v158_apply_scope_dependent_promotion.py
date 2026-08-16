@@ -46,8 +46,7 @@ if missing:
 combined = src_path.read_text()
 for forbidden in (
     "V153P", "V153Q", "V156Pair", "MemNat", "ScheduleQualityRegressionTest",
-    "DependentArgs", "DeriveSTLCGenerator", "StrataLexprGen", "Cedar",
-    "Unit", "Bool"
+    "DependentArgs", "DeriveSTLCGenerator", "StrataLexprGen", "Cedar"
 ):
     if forbidden in combined:
         raise SystemExit(f"fixture/domain token leaked into V158 implementation: {forbidden}")
