@@ -1,0 +1,140 @@
+name: V162 finite requirement threading
+
+on:
+  push:
+    branches: ["v162-finite-requirement-threading-candidate"]
+    paths:
+      - '.github/workflows/v162-finite-requirement-threading.yml'
+  workflow_dispatch:
+
+jobs:
+  finite-threading:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact admitted K2 K5 and V156
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          python scripts/v156_apply_requirement_aware_deriver.py
+          lake build Specimen.MakeConstrainedProducerInstance Specimen.DeriveConstrainedProducer
+      - name: Freeze V162 admission fixtures
+        run: |
+          cat > /tmp/V162P2Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V162P2 where
+            A : Type
+            B : Type
+          abbrev V162P2A : V162P2 := ⟨Unit, Unit⟩
+          inductive V162Box2 (p : V162P2) where | mk : p.A → p.B → V162Box2 p
+          inductive V162Has2 (p : V162P2) : V162Box2 p → Prop where | mk (a : p.A) (b : p.B) : V162Has2 p (.mk a b)
+          EOF
+          cp /tmp/V162P2Common.lean /tmp/V162_A0.lean
+          echo 'derive_generator_with_requirements (fun (p : V162P2) => ∃ b : V162Box2 p, V162Has2 p b)' >> /tmp/V162_A0.lean
+          cp /tmp/V162P2Common.lean /tmp/V162_I1.lean
+          cat >> /tmp/V162_I1.lean <<'EOF'
+          derive_generator_with_requirements (fun (p : V162P2) => ∃ b : V162Box2 p, V162Has2 p b)
+          #synth ArbitrarySizedSuchThat (V162Box2 V162P2A) (fun b => V162Has2 V162P2A b)
+          EOF
+          cp /tmp/V162P2Common.lean /tmp/V162_LEGACY.lean
+          cat >> /tmp/V162_LEGACY.lean <<'EOF'
+          derive_generator (fun (p : V162P2) => ∃ b : V162Box2 p, V162Has2 p b)
+          EOF
+          cat > /tmp/V162_I2.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V162Q3 where
+            X : Type
+            Y : Type
+            Z : Type
+          abbrev V162Q3A : V162Q3 := ⟨Unit, Unit, Unit⟩
+          inductive V162Crate3 (q : V162Q3) where | pack : q.X → q.Y → q.Z → V162Crate3 q
+          inductive V162Good3 (q : V162Q3) : V162Crate3 q → Prop where | pack (x : q.X) (y : q.Y) (z : q.Z) : V162Good3 q (.pack x y z)
+          derive_generator_with_requirements (fun (q : V162Q3) => ∃ c : V162Crate3 q, V162Good3 q c)
+          #synth ArbitrarySizedSuchThat (V162Crate3 V162Q3A) (fun c => V162Good3 V162Q3A c)
+          EOF
+          cat > /tmp/V162_I3.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V162R1 where T : Type
+          abbrev V162R1A : V162R1 := ⟨Unit⟩
+          inductive V162Cell1 (r : V162R1) where | put : r.T → V162Cell1 r
+          inductive V162Ok1 (r : V162R1) : V162Cell1 r → Prop where | put (x : r.T) : V162Ok1 r (.put x)
+          derive_generator_with_requirements (fun (r : V162R1) => ∃ c : V162Cell1 r, V162Ok1 r c)
+          #synth ArbitrarySizedSuchThat (V162Cell1 V162R1A) (fun c => V162Ok1 V162R1A c)
+          EOF
+      - name: Reproduce exact V156 arity ablation
+        run: |
+          python - <<'PY'
+          import json,pathlib,re,subprocess
+          p=subprocess.run(['lake','env','lean','/tmp/V162_A0.lean'],capture_output=True,text=True)
+          log=p.stdout+p.stderr; pathlib.Path('v162_A0.log').write_text(log); lo=log.lower()
+          m=re.search(r'discovered\s+(\d+)',lo)
+          c='PASS' if p.returncode==0 else ('ARITY_FAILURE' if 'requirement-aware deriver currently supports' in lo else 'OTHER_FAILURE')
+          r={'rc':p.returncode,'class':c,'discovered_count':None if m is None else int(m.group(1)),'tail':log[-10000:]}
+          pathlib.Path('v162_ablation.json').write_text(json.dumps(r,indent=2)+'\n'); print(json.dumps(r,indent=2))
+          PY
+      - name: Apply frozen V162 finite threading candidate
+        run: |
+          python scripts/v162_apply_finite_requirement_threading.py | tee v162_apply.log
+          git diff -- Specimen/MakeConstrainedProducerInstance.lean Specimen/DeriveConstrainedProducer.lean > v162_candidate.patch
+          if grep -Eq 'V162P2|V162Q3|V162R1|TwoLeaf|ThreeLeaf' v162_candidate.patch; then
+            echo fixture-specific-token-leak
+            exit 162
+          fi
+          lake build Specimen.MakeConstrainedProducerInstance Specimen.DeriveConstrainedProducer
+      - name: Run frozen V162 admission arms
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          out={}
+          for name in ['I1','I2','I3','LEGACY']:
+            p=subprocess.run(['lake','env','lean',f'/tmp/V162_{name}.lean'],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v162_{name}.log').write_text(log); lo=log.lower()
+            if p.returncode==0:c='PASS'
+            elif 'failed to synthesize' in lo:c='SYNTH_FAILURE'
+            elif 'requirement-aware deriver currently supports' in lo:c='ARITY_FAILURE'
+            else:c='OTHER_FAILURE'
+            out[name]={'rc':p.returncode,'class':c,'tail':log[-14000:]}
+          pathlib.Path('v162_arms.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Protected suite
+        continue-on-error: true
+        run: |
+          set +e; lake build > v162_build.log 2>&1; B=$?; lake test > v162_test.log 2>&1; T=$?; set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v162_protected.json
+          exit 0
+      - name: Frozen V162 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def load(p): return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
+          a=load('v162_ablation.json'); i=load('v162_arms.json'); p=load('v162_protected.json')
+          if a is None or i is None or p is None:v='R10_INCONCLUSIVE'
+          elif a['class']!='ARITY_FAILURE' or a['discovered_count']!=2:v='REJECT_V162_V156_ARITY_ABLATION_NOT_REPRODUCED'
+          elif p.get('build')!=0 or p.get('test')!=0:v='R10_PROTECTED_FAILURE'
+          elif i['I1']['class']=='PASS' and i['I2']['class']=='PASS' and i['I3']['class']=='PASS' and i['LEGACY']['class']!='PASS':v='PASS_V162_FINITE_REQUIREMENT_THREADING_ADMITTED_SCOPED'
+          else:v='NEGATIVE_V162_FINITE_THREADING_DOES_NOT_CLOSE_PURE_MULTIPLICITY'
+          r={'canonical_id':'V162_FINITE_REQUIREMENT_THREADING','ablation':a,'arms':None if i is None else {k:x['class'] for k,x in i.items()},'protected':p,'verdict':v,'claim_boundary':'Finite transport of already-discovered requirements only; no discovery, semantic typing, dependency discharge, or new Lean expressivity.'}
+          pathlib.Path('v162_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v162_result.json || true
+          for f in v162_A0.log v162_I1.log v162_I2.log v162_I3.log v162_LEGACY.log; do [ -f "$f" ] && { echo ==== $f ====; cat "$f"; }; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v162-finite-requirement-threading
+          path: v162_*
