@@ -1,0 +1,89 @@
+name: V144 auto-derive context separator
+on:
+  push:
+    branches: ["v144-autoderive-context-separator"]
+  workflow_dispatch:
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {lint: "false", test: "false"}
+      - name: Apply exact admitted K2 K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Materialize arms
+        run: |
+          cat > /tmp/V144Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V144P where Meta : Type
+          def V144P0 : V144P := ⟨Unit⟩
+          inductive V144Box (p : V144P) : Type where | mk : p.Meta → V144Box p
+          inductive V144Has {p : V144P} : V144Box p → Prop where | mk (x : p.Meta) : V144Has (V144Box.mk x)
+          EOF
+          cp /tmp/V144Common.lean /tmp/A0.lean; cat >> /tmp/A0.lean <<'EOF'
+          derive_mutual (fun (_ : Unit) => ∃ b : V144Box V144P0, V144Has b)
+          EOF
+          cp /tmp/V144Common.lean /tmp/A1.lean; cat >> /tmp/A1.lean <<'EOF'
+          derive_mutual (fun (p : V144P) [inst : Plausible.Arbitrary p.Meta] (_ : Unit) => ∃ b : V144Box p, V144Has b)
+          EOF
+          cp /tmp/V144Common.lean /tmp/F0.lean; cat >> /tmp/F0.lean <<'EOF'
+          set_option specimen.autoDeriveDeps false in
+          derive_mutual (fun (_ : Unit) => ∃ b : V144Box V144P0, V144Has b)
+          EOF
+          cp /tmp/V144Common.lean /tmp/F1.lean; cat >> /tmp/F1.lean <<'EOF'
+          set_option specimen.autoDeriveDeps false in
+          derive_mutual (fun (p : V144P) [inst : Plausible.Arbitrary p.Meta] (_ : Unit) => ∃ b : V144Box p, V144Has b)
+          EOF
+          cp /tmp/V144Common.lean /tmp/F2.lean; cat >> /tmp/F2.lean <<'EOF'
+          set_option specimen.autoDeriveDeps false in
+          derive_mutual (fun (p : V144P) [inst : Plausible.Arbitrary p.Meta] (_ : Unit) => ∃ b : V144Box p, V144Has b)
+          #synth ArbitrarySizedSuchThat (V144Box V144P0) (fun b => V144Has b)
+          EOF
+      - name: Run arms
+        run: |
+          python - <<'PY'
+          import subprocess,json,pathlib
+          out={}
+          for n in ['A0','A1','F0','F1','F2']:
+            p=subprocess.run(['lake','env','lean',f'/tmp/{n}.lean'],capture_output=True,text=True); log=p.stdout+p.stderr; pathlib.Path(f'v144_{n}.log').write_text(log); lo=log.lower()
+            if p.returncode==0:c='PASS'
+            elif 'expected to be a variable' in lo:c='NON_FVAR_APPLICABILITY'
+            elif 'failed to synthesize' in lo and 'meta' in lo:c='SYMBOLIC_INSTANCE'
+            elif 'unknown option' in lo or 'unexpected token' in lo:c='R10_APPARATUS'
+            else:c='OTHER_FAILURE'
+            out[n]={'rc':p.returncode,'class':c,'first_error':next((x for x in log.splitlines() if 'error' in x.lower()),'')}
+          pathlib.Path('v144_arms.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Protected suite
+        run: |
+          set +e; lake build > v144_build.log 2>&1; B=$?; lake test > v144_test.log 2>&1; T=$?; set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v144_protected.json
+          [ "$B" -eq 0 ] && [ "$T" -eq 0 ]
+      - name: Verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          a=json.loads(pathlib.Path('v144_arms.json').read_text()) if pathlib.Path('v144_arms.json').exists() else {}; p=json.loads(pathlib.Path('v144_protected.json').read_text()) if pathlib.Path('v144_protected.json').exists() else None; c=lambda k:a.get(k,{}).get('class')
+          g={'P1_protected':p is not None and p.get('build')==0 and p.get('test')==0,'P2_controls':c('A0')=='NON_FVAR_APPLICABILITY' and c('A1')=='SYMBOLIC_INSTANCE','P3_fallback_param':c('F1')=='PASS','P4_fallback_specialization':c('F2')=='PASS'}
+          if any(c(k)=='R10_APPARATUS' for k in a):v='R10_INCONCLUSIVE'
+          elif all(g.values()):v='REJECT_K6_ROUTING_PATH_EXPLAINS_CONTEXT_LOSS'
+          elif g['P1_protected'] and g['P2_controls']:v='K6_REMAINS_LICENSED_AFTER_ROUTING_SEPARATOR'
+          else:v='INCONCLUSIVE_CONTROL_FAILURE'
+          r={'canonical_id':'V144_AUTODERIVE_CONTEXT_SEPARATOR','arms':a,'gates':g,'protected':p,'verdict':v,'claim_boundary':'Routing separator only; no K6 or constructor-development claim.'}; pathlib.Path('v144_result.json').write_text(json.dumps(r,indent=2)+'\n'); print(json.dumps(r,indent=2))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          for f in v144_[AF]*.log; do [ -e "$f" ] && { echo =====$f=====; cat "$f"; }; done
+          cat v144_result.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: v144-autoderive-context-separator, path: "v144_*"}
