@@ -71,6 +71,7 @@ jobs:
             SpecimenTest/ScheduleQualityRegressionTest.lean | tee v158_fixture_hashes.txt
           sha256sum protocols/V158_SCOPE_VALID_PREREQUISITE_PLACEMENT_PRECOMMIT.md \
             protocols/V158A_SCOPE_OPERATIONALIZATION_ADDENDUM.md \
+            protocols/V158B_SYNTAX_WALKER_TERMINATION_APPARATUS_ADDENDUM.md \
             scripts/v156_apply_requirement_provenance_promotion.py \
             scripts/v156b_apply_checker_consumer_compat.py \
             scripts/v158_apply_scope_dependent_promotion.py | tee v158_protocol_hashes.txt
@@ -99,7 +100,8 @@ jobs:
           grep -q 'REQUIREMENT_PROVENANCE_PROMOTION_APPLIED' v158_v156_apply.log
           grep -q 'V156B_CHECKER_CONSUMER_COMPAT_APPLIED' v158_v156b_adapter.log
           grep -q 'SCOPE_DEPENDENT_REQUIREMENT_PROMOTION_APPLIED' v158_apply.log
-          grep -q 'syntaxMentionsInput req.term.raw freshenedInputNamesExcludingOutput' Specimen/DeriveConstrainedProducer.lean
+          grep -q 'partial def v158SyntaxMentionsInput' Specimen/DeriveConstrainedProducer.lean
+          grep -q 'v158SyntaxMentionsInput req.term.raw freshenedInputNamesExcludingOutput' Specimen/DeriveConstrainedProducer.lean
           grep -q 'origin := .unconstrained' Specimen/MExp.lean
           grep -q 'origin := .constrained' Specimen/MExp.lean
           grep -q 'k6_required_outer_' Specimen/MakeConstrainedProducerInstance.lean
