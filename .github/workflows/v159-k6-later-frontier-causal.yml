@@ -1,0 +1,170 @@
+name: V159 K6 later-frontier causal dependence
+
+on:
+  push:
+    branches: ["v159-k6-later-frontier-causal"]
+    paths:
+      - '.github/workflows/v159-k6-later-frontier-causal.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  causal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: default, test: false, lint: false}
+
+      - name: Freeze V159 provenance and eligibility
+        run: |
+          set -o pipefail
+          sha256sum protocols/V159_K6_LATER_FRONTIER_CAUSAL_PRECOMMIT.md \
+            protocols/V159A_V158_ELIGIBILITY_RECORD.md \
+            reports/V158_SCOPE_VALID_PLACEMENT_RESULT.md \
+            SpecimenTest/StrataLexprGen.lean \
+            scripts/v120_apply_binder_aware_fixed_parameter.py \
+            scripts/v132_apply_output_dependent_input_determined.py \
+            scripts/v156_apply_requirement_provenance_promotion.py \
+            scripts/v156b_apply_checker_consumer_compat.py \
+            scripts/v158_apply_scope_dependent_promotion.py | tee v159_frozen_hashes.txt
+          test "$(sha256sum scripts/v156_apply_requirement_provenance_promotion.py | awk '{print $1}')" = "17074519a184a741e74466aa81604e809a14478abc15568f845395c788664d5c"
+          test "$(sha256sum scripts/v156b_apply_checker_consumer_compat.py | awk '{print $1}')" = "8f3f7869fd775a8b6390e9d1483faa6a5d63bb4f52722b85f8374f17d1befd78"
+          test "$(sha256sum scripts/v158_apply_scope_dependent_promotion.py | awk '{print $1}')" = "d88527a37a480313ac01a4730832f10f7f7ca6273c338e0523eacddea3200826"
+
+      - name: Arm A K2 K5 baseline
+        run: |
+          set -o pipefail
+          git checkout HEAD -- Specimen SpecimenTest
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          rm -rf .lake/build
+          python - <<'PY'
+          import json,pathlib,subprocess,time
+          t=time.monotonic()
+          p=subprocess.run(['lake','build','SpecimenTest.StrataLexprGen'],capture_output=True,text=True)
+          dt=time.monotonic()-t
+          log=p.stdout+p.stderr; pathlib.Path('v159_A.log').write_text(log)
+          lo=log.lower()
+          if p.returncode==0: cls='PASS'
+          elif 'failed to synthesize instance of type class' in lo: cls='TYPECLASS_FRONTIER'
+          elif 'expected to be a variable' in lo: cls='NON_FVAR_APPLICABILITY'
+          else: cls='OTHER_FAILURE'
+          r={'rc':p.returncode,'class':cls,'wall_seconds':dt}
+          pathlib.Path('v159_A.json').write_text(json.dumps(r,indent=2)+'\n'); print(json.dumps(r,indent=2))
+          PY
+
+      - name: Arm B K2 K5 plus admitted K6
+        run: |
+          set -o pipefail
+          git checkout HEAD -- Specimen SpecimenTest
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          python scripts/v156_apply_requirement_provenance_promotion.py | tee v159_B_v156.log
+          python scripts/v156b_apply_checker_consumer_compat.py | tee v159_B_v156b.log
+          python scripts/v158_apply_scope_dependent_promotion.py | tee v159_B_v158.log
+          grep -q REQUIREMENT_PROVENANCE_PROMOTION_APPLIED v159_B_v156.log
+          grep -q V156B_CHECKER_CONSUMER_COMPAT_APPLIED v159_B_v156b.log
+          grep -q SCOPE_DEPENDENT_REQUIREMENT_PROMOTION_APPLIED v159_B_v158.log
+          rm -rf .lake/build
+          python - <<'PY'
+          import json,pathlib,subprocess,time
+          t=time.monotonic()
+          p=subprocess.run(['lake','build','SpecimenTest.StrataLexprGen'],capture_output=True,text=True)
+          dt=time.monotonic()-t
+          log=p.stdout+p.stderr; pathlib.Path('v159_B.log').write_text(log)
+          lo=log.lower()
+          if p.returncode==0: cls='PASS'
+          elif 'failed to synthesize instance of type class' in lo: cls='TYPECLASS_FRONTIER'
+          elif 'expected to be a variable' in lo: cls='NON_FVAR_APPLICABILITY'
+          else: cls='OTHER_FAILURE'
+          r={'rc':p.returncode,'class':cls,'wall_seconds':dt}
+          pathlib.Path('v159_B.json').write_text(json.dumps(r,indent=2)+'\n'); print(json.dumps(r,indent=2))
+          PY
+
+      - name: Arm B full protected behavior
+        continue-on-error: true
+        run: |
+          set +e
+          lake build > v159_B_build.log 2>&1; BB=$?
+          lake test > v159_B_test.log 2>&1; BT=$?
+          set -e
+          printf '{"build":%s,"test":%s}\n' "$BB" "$BT" > v159_B_protected.json
+
+      - name: Arm C independent K6 ablation
+        run: |
+          set -o pipefail
+          git checkout HEAD -- Specimen SpecimenTest
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          rm -rf .lake/build
+          python - <<'PY'
+          import json,pathlib,subprocess,time
+          t=time.monotonic()
+          p=subprocess.run(['lake','build','SpecimenTest.StrataLexprGen'],capture_output=True,text=True)
+          dt=time.monotonic()-t
+          log=p.stdout+p.stderr; pathlib.Path('v159_C.log').write_text(log)
+          lo=log.lower()
+          if p.returncode==0: cls='PASS'
+          elif 'failed to synthesize instance of type class' in lo: cls='TYPECLASS_FRONTIER'
+          elif 'expected to be a variable' in lo: cls='NON_FVAR_APPLICABILITY'
+          else: cls='OTHER_FAILURE'
+          r={'rc':p.returncode,'class':cls,'wall_seconds':dt}
+          pathlib.Path('v159_C.json').write_text(json.dumps(r,indent=2)+'\n'); print(json.dumps(r,indent=2))
+          PY
+
+      - name: Frozen V159 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def load(p): return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
+          A=load('v159_A.json'); B=load('v159_B.json'); C=load('v159_C.json'); P=load('v159_B_protected.json')
+          applied=all(pathlib.Path(f).exists() for f in ['v159_B_v156.log','v159_B_v156b.log','v159_B_v158.log'])
+          apparatus=any(x is None for x in [A,B,C,P]) or not pathlib.Path('v159_frozen_hashes.txt').exists() or not applied
+          if apparatus:
+            r={'canonical_id':'V159_K6_LATER_FRONTIER_CAUSAL','verdict':'R10_V159_INCONCLUSIVE','constructor_development':False}
+          else:
+            baseline_fail=A['rc']!=0 and A['class']!='OTHER_FAILURE'
+            intervention_pass=B['class']=='PASS'
+            ablation_fail=C['rc']!=0 and C['class']!='OTHER_FAILURE'
+            protected=P.get('build')==0 and P.get('test')==0
+            if baseline_fail and intervention_pass and ablation_fail and protected:
+              v='PASS_V159_K6_CAUSES_LATER_FRONTIER_REACHABILITY'
+              dev=True
+            elif A['class']=='PASS' and B['class']=='PASS':
+              v='NULL_V159_NO_REACHABILITY_MOVEMENT'
+              dev=False
+            elif baseline_fail and B['rc']!=0:
+              v='NEGATIVE_V159_LATER_FRONTIER_NOT_MOVED'
+              dev=False
+            else:
+              v='INCONCLUSIVE_V159_UNCLASSIFIED_SEMANTIC_PATTERN'
+              dev=False
+            r={'canonical_id':'V159_K6_LATER_FRONTIER_CAUSAL','A':A,'B':B,'C':C,'B_protected':P,
+               'gates':{'baseline_frontier_failure':baseline_fail,'K6_intervention_pass':intervention_pass,
+                        'K6_ablation_restores_failure':ablation_fail,'protected_pass':protected,
+                        'target_precommitted':True,'K6_byte_identity_checked':True},
+               'verdict':v,'constructor_development':dev,
+               'claim_boundary':'At most one scoped K_previous→K6→later natural frontier transition; not recursive/open-ended development.'}
+          pathlib.Path('v159_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v159_result.json || true
+          for f in v159_A.log v159_B.log v159_C.log; do [ -f "$f" ] && { echo ==== $f ====; tail -120 "$f"; }; done
+          [ -f v159_B_test.log ] && tail -180 v159_B_test.log || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v159-k6-later-frontier-causal
+          path: v159_*
+          if-no-files-found: warn
+          retention-days: 90
