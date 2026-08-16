@@ -1,0 +1,120 @@
+name: V168 post V166 pinned external frontier
+
+on:
+  push:
+    branches: ["v168-post-v166-pinned-external-frontier"]
+    paths:
+      - '.github/workflows/v168-post-v166-pinned-external-frontier.yml'
+      - 'experiments/V168_POST_V166_PINNED_EXTERNAL_FRONTIER_PREREG.md'
+  workflow_dispatch:
+
+jobs:
+  external:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact admitted K2 K5 V156 V166
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          python scripts/v156_apply_requirement_aware_deriver.py
+          python scripts/v162_apply_finite_requirement_threading.py > v168_v166_apply.log
+          grep -q 'V166_V162_BINDER_ARRAY_TYPING_REPAIRED' v168_v166_apply.log
+          lake build Specimen.MakeConstrainedProducerInstance Specimen.DeriveConstrainedProducer
+      - name: Fetch and verify pinned upstream PR47 fixture
+        run: |
+          git remote add v168-upstream https://github.com/strata-org/specimen.git
+          git fetch --depth=1 v168-upstream da0e21613e9d18d44fe0f54e05ea003699a1adc0
+          git show FETCH_HEAD:SpecimenTest/DeriveArbitrarySuchThat/DeriveStructParamGenerator.lean > /tmp/V168_UPSTREAM.lean
+          BLOB=$(git hash-object /tmp/V168_UPSTREAM.lean)
+          echo "upstream_blob=$BLOB" | tee v168_source_identity.txt
+          test "$BLOB" = "b20b11e33026d2a69a4d715f44f3b5e564d5fc75"
+      - name: Freeze exact V158 standalone adaptation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          src=Path('/tmp/V168_UPSTREAM.lean').read_text()
+          start='#guard_msgs(drop info, drop warning) in\nderive_mutual\n'
+          runtime='/-! ## The derived producers actually run\n'
+          if start not in src or runtime not in src: raise SystemExit('R10 markers missing')
+          prefix,rest=src.split(start,1)
+          _,tail=rest.split(runtime,1)
+          enum_marker='#guard_msgs(drop info) in\n#eval do\n  let results ← runSizedEnum\n'
+          if enum_marker not in tail: raise SystemExit('R10 enum marker missing')
+          gen_tail,_=tail.split(enum_marker,1)
+          target='(fun (P : ExprParams) (Γ : List Ty) (τ : Ty) => ∃ e : Tm P, @HasType P Γ e τ)'
+          adapted=prefix+'derive_generator_with_requirements '+target+'\n\n'+runtime+gen_tail+'end StructParamSTLC\n'
+          Path('/tmp/V168_I0.lean').write_text(adapted)
+          Path('v168_adaptation.json').write_text(json.dumps({'source_blob':'b20b11e33026d2a69a4d715f44f3b5e564d5fc75','target':target,'boundary':'same V158 standalone adaptation'},indent=2)+'\n')
+          PY
+      - name: Run frozen finite transport external arm
+        continue-on-error: true
+        run: |
+          set +e
+          lake env lean /tmp/V168_I0.lean > v168_I0.log 2>&1
+          RC=$?
+          set -e
+          python - <<'PY'
+          import json,pathlib,re
+          rc=int('${{ job.status == "success" }}'=='true') if False else int(pathlib.Path('/dev/null').exists())
+          PY
+          echo "$RC" > v168_I0_rc.txt
+          tail -n 260 v168_I0.log
+          exit 0
+      - name: Classify external residual
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          rc=int(pathlib.Path('v168_I0_rc.txt').read_text())
+          log=pathlib.Path('v168_I0.log').read_text(); lo=log.lower()
+          if rc==0:c='PASS'
+          elif 'requirement-aware deriver currently supports' in lo:c='ARITY_FAILURE'
+          elif 'failed to synthesize' in lo and ('arbitrarysizedsuchthat' in lo or 'enumsizedsuchthat' in lo):c='CONSTRAINED_DEPENDENCY_SYNTH_FAILURE'
+          elif 'failed to synthesize' in lo:c='SYNTH_FAILURE'
+          elif 'unknown free variable' in lo:c='FREE_FVAR'
+          elif 'unable to derive producer schedule' in lo or 'cannot derive constrained producer' in lo:c='SCHEDULE_FAILURE'
+          else:c='OTHER_FAILURE'
+          pathlib.Path('v168_intervention.json').write_text(json.dumps({'rc':rc,'class':c,'tail':log[-20000:]},indent=2)+'\n'); print(json.dumps({'rc':rc,'class':c},indent=2))
+          PY
+      - name: Protected suite
+        continue-on-error: true
+        run: |
+          set +e; lake build > v168_build.log 2>&1; B=$?; lake test > v168_test.log 2>&1; T=$?; set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v168_protected.json
+          exit 0
+      - name: Frozen V168 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def load(p): return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
+          i=load('v168_intervention.json'); p=load('v168_protected.json')
+          ident=pathlib.Path('v168_source_identity.txt').read_text() if pathlib.Path('v168_source_identity.txt').exists() else ''
+          source_ok='b20b11e33026d2a69a4d715f44f3b5e564d5fc75' in ident
+          prot=p is not None and p.get('build')==0 and p.get('test')==0
+          if i is None or p is None or not source_ok:v='R10_SOURCE_OR_APPARATUS_INCONCLUSIVE'
+          elif not prot:v='R10_PROTECTED_FAILURE'
+          elif i['class']=='PASS':v='PASS_V168_FINITE_TRANSPORT_EXTERNAL_TRANSFER'
+          elif i['class']=='CONSTRAINED_DEPENDENCY_SYNTH_FAILURE':v='PASS_V168_EXTERNAL_DEPENDENCY_DISCHARGE_RESIDUAL'
+          elif i['class']=='ARITY_FAILURE':v='R10_V166_NOT_APPLIED'
+          else:v='NEGATIVE_V168_OTHER_EXTERNAL_RESIDUAL'
+          r={'canonical_id':'V168_POST_V166_PINNED_EXTERNAL_FRONTIER','source_blob':'b20b11e33026d2a69a4d715f44f3b5e564d5fc75','intervention':None if i is None else i['class'],'protected':p,'verdict':v,'claim_boundary':'Pinned external frontier; finite transport only. No discharge operator or external novelty claim.'}
+          pathlib.Path('v168_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v168_result.json || true
+          cat v168_source_identity.txt || true
+          tail -n 320 v168_I0.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v168-post-v166-pinned-external-frontier
+          path: v168_*
