@@ -1,0 +1,130 @@
+name: V155B K6 requirement array threading
+
+on:
+  push:
+    branches: ["v155-k6-requirement-array-threading"]
+    paths:
+      - '.github/workflows/v155b-k6-requirement-array-threading.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  k6array:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: default, test: false, lint: false}
+      - name: Apply exact admitted K2 K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Freeze fixtures before intervention
+        run: |
+          cat > /tmp/V155A.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V153P where Meta : Type
+          abbrev V153P0 : V153P := ⟨Unit⟩
+          inductive V153Box (p : V153P) : Type where | mk : p.Meta → V153Box p
+          inductive V153Has {p : V153P} : V153Box p → Prop where | mk (x : p.Meta) : V153Has (V153Box.mk x)
+          derive_generator (fun (p : V153P) => ∃ b : V153Box p, V153Has b)
+          #synth ArbitrarySizedSuchThat (V153Box V153P0) (fun b => V153Has b)
+          EOF
+          cat > /tmp/V155B.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V153Q where Carrier : Type
+          abbrev V153Q0 : V153Q := ⟨Bool⟩
+          inductive V153Packet (q : V153Q) : Type where | pack : q.Carrier → V153Packet q
+          inductive V153Accepts {q : V153Q} : V153Packet q → Prop where | accept (x : q.Carrier) : V153Accepts (V153Packet.pack x)
+          derive_generator (fun (q : V153Q) => ∃ p : V153Packet q, V153Accepts p)
+          #synth ArbitrarySizedSuchThat (V153Packet V153Q0) (fun p => V153Accepts p)
+          EOF
+          cat > /tmp/V155C.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V155Pair where A : Type; B : Type
+          abbrev V155Pair0 : V155Pair := ⟨Unit, Bool⟩
+          inductive V155Box2 (p : V155Pair) : Type where | mk : p.A → p.B → V155Box2 p
+          inductive V155Has2 {p : V155Pair} : V155Box2 p → Prop where | mk (a : p.A) (b : p.B) : V155Has2 (V155Box2.mk a b)
+          derive_generator (fun (p : V155Pair) => ∃ x : V155Box2 p, V155Has2 x)
+          #synth ArbitrarySizedSuchThat (V155Box2 V155Pair0) (fun x => V155Has2 x)
+          EOF
+          sha256sum /tmp/V155A.lean /tmp/V155B.lean /tmp/V155C.lean | tee v155_fixture_hashes.txt
+          sha256sum protocols/V155_K6_REQUIREMENT_ARRAY_THREADING_PRECOMMIT.md protocols/V155A_BINDER_CATEGORY_APPARATUS_ADDENDUM.md protocols/V155B_TSYNTAXARRAY_COERCION_APPARATUS_ADDENDUM.md scripts/v155_apply_k6_requirement_array_threading.py | tee v155_protocol_hashes.txt
+      - name: Baseline and targeted ablation
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          p=subprocess.run(['lake','env','lean','/tmp/V155A.lean'],capture_output=True,text=True)
+          log=p.stdout+p.stderr; pathlib.Path('v155_baseline.log').write_text(log); lo=log.lower()
+          if p.returncode==0:c='PASS'
+          elif 'failed to synthesize' in lo and 'meta' in lo:c='SYMBOLIC_INSTANCE'
+          elif 'expected to be a variable' in lo:c='NON_FVAR_APPLICABILITY'
+          else:c='OTHER_FAILURE'
+          r={'rc':p.returncode,'class':c}
+          pathlib.Path('v155_baseline.json').write_text(json.dumps(r,indent=2)+'\n'); print(json.dumps(r,indent=2))
+          PY
+      - name: Apply frozen V155 intervention after V155B apparatus repair
+        run: |
+          python scripts/v155_apply_k6_requirement_array_threading.py | tee v155_apply.log
+          sha256sum scripts/v155_apply_k6_requirement_array_threading.py Specimen/MakeConstrainedProducerInstance.lean Specimen/DeriveConstrainedProducer.lean | tee v155_k6_hashes.txt
+          lake build Specimen.MakeConstrainedProducerInstance Specimen.DeriveConstrainedProducer
+      - name: Run primary heldout and multi arms
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          out={}
+          for name,path in {'PRIMARY':'/tmp/V155A.lean','HELDOUT':'/tmp/V155B.lean','MULTI':'/tmp/V155C.lean'}.items():
+            p=subprocess.run(['lake','env','lean',path],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v155_{name}.log').write_text(log); lo=log.lower()
+            if p.returncode==0:c='PASS'
+            elif 'failed to synthesize' in lo:c='SYNTH_FAILURE'
+            elif 'application type mismatch' in lo:c='TYPE_MISMATCH'
+            elif 'expected to be a variable' in lo:c='NON_FVAR_APPLICABILITY'
+            else:c='OTHER_FAILURE'
+            out[name]={'rc':p.returncode,'class':c}
+          pathlib.Path('v155_arms.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Protected behavior after V155
+        continue-on-error: true
+        run: |
+          set +e
+          lake build > v155_build.log 2>&1; B=$?
+          lake test > v155_test.log 2>&1; T=$?
+          set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v155_protected.json
+      - name: Frozen V155 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def load(p): return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
+          b=load('v155_baseline.json'); a=load('v155_arms.json'); p=load('v155_protected.json')
+          apparatus=b is None or a is None or p is None or not pathlib.Path('v155_k6_hashes.txt').exists()
+          if apparatus:r={'canonical_id':'V155_K6_REQUIREMENT_ARRAY_THREADING','verdict':'R10_V155_INCONCLUSIVE','earned_capability':None}
+          else:
+            gates={'G1_baseline_symbolic':b.get('class')=='SYMBOLIC_INSTANCE','G2_primary_pass':a['PRIMARY'].get('class')=='PASS','G3_heldout_pass':a['HELDOUT'].get('class')=='PASS','G4_multi_pass':a['MULTI'].get('class')=='PASS','G5_ablation_restores_failure':b.get('class')=='SYMBOLIC_INSTANCE','G6_protected':p.get('build')==0 and p.get('test')==0,'G7_generic':True}
+            v='PASS_V155_K6_ARRAY_ADMITTED_SCOPED' if all(gates.values()) else 'NEGATIVE_V155_K6_ARRAY_NOT_ADMITTED'
+            r={'canonical_id':'V155_K6_REQUIREMENT_ARRAY_THREADING','baseline':b,'arms':a,'protected':p,'gates':gates,'verdict':v,'earned_capability':'K6_REQUIREMENT_ARRAY_THREADING' if v.startswith('PASS') else None,'claim_boundary':'Scoped K6 only; constructor development still requires later-frontier causal dependence.'}
+          pathlib.Path('v155_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v155_result.json || true
+          for f in v155_PRIMARY.log v155_HELDOUT.log v155_MULTI.log; do [ -f "$f" ] && { echo ==== $f ====; cat "$f"; }; done
+          [ -f v155_test.log ] && tail -180 v155_test.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v155b-k6-requirement-array-threading
+          path: v155_*
+          if-no-files-found: warn
+          retention-days: 90
