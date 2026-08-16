@@ -1,0 +1,156 @@
+name: V140 K6 fixed-argument preservation admission
+
+on:
+  push:
+    branches: ["v140-k6-fixed-argument-preservation"]
+  workflow_dispatch:
+
+jobs:
+  admission:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+
+      - name: Freeze V140 fixtures
+        run: |
+          cat > /tmp/V140Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+
+          structure V140P where
+            Meta : Type
+
+          def V140P0 : V140P := ⟨Unit⟩
+
+          inductive V140Box (p : V140P) : Type where
+          | mk : p.Meta → V140Box p
+
+          inductive V140Has {p : V140P} : V140Box p → Prop where
+          | mk (x : p.Meta) : V140Has (V140Box.mk x)
+          EOF
+          cp /tmp/V140Common.lean /tmp/V140Direct.lean
+          cat >> /tmp/V140Direct.lean <<'EOF'
+
+          derive_mutual (fun (_ : Unit) => ∃ b : V140Box V140P0, V140Has b)
+          EOF
+          cp /tmp/V140Common.lean /tmp/V140Generic.lean
+          cat >> /tmp/V140Generic.lean <<'EOF'
+
+          derive_mutual (fun (p : V140P) => ∃ b : V140Box p, V140Has b)
+          EOF
+
+      - name: Execute frozen K6 admission protocol
+        shell: bash
+        run: |
+          set -u
+          python - <<'PY'
+          import json, pathlib, subprocess
+
+          def run(cmd, log=None, timeout=2400):
+              p=subprocess.run(cmd, text=True, capture_output=True, timeout=timeout)
+              out=p.stdout+p.stderr
+              if log: pathlib.Path(log).write_text(out)
+              return p.returncode,out
+
+          def classify(rc,log):
+              low=log.lower()
+              if rc == 0: return 'PASS'
+              if 'expected to be a variable' in low: return 'NON_FVAR_APPLICABILITY'
+              if (('arbitrary' in low or 'synth' in low or 'instance' in low) and 'meta' in low): return 'SYMBOLIC_INSTANCE'
+              return 'OTHER_FAILURE'
+
+          out={'canonical_id':'V140_K6_FIXED_ARGUMENT_PRESERVATION','protocol':'research/V140_K6_FIXED_ARGUMENT_PRESERVATION_PRECOMMIT.md'}
+
+          # Baseline: exact admitted K2+K5, no K6.
+          r1,l1=run(['python','scripts/v120_apply_binder_aware_fixed_parameter.py'],'v140_apply_k2.log')
+          r2,l2=run(['python','scripts/v132_apply_output_dependent_input_determined.py'],'v140_apply_k5.log')
+          rb,lb=run(['lake','build','Specimen.DeriveConstrainedProducer'],'v140_baseline_module.log')
+          rd0,ld0=run(['lake','env','lean','/tmp/V140Direct.lean'],'v140_baseline_direct.log') if rb==0 else (99,lb)
+          baseline_class=classify(rd0,ld0)
+          out['baseline']={'k2_rc':r1,'k5_rc':r2,'module_rc':rb,'direct_rc':rd0,'direct_class':baseline_class}
+
+          # K6 intervention.
+          rk6,lk6=run(['python','scripts/v140_apply_fixed_argument_preservation.py'],'v140_apply_k6.log')
+          pathlib.Path('v140_k6.patch').write_text(subprocess.run(['git','diff','--','Specimen/DeriveConstrainedProducer.lean'],text=True,capture_output=True).stdout)
+          patch=pathlib.Path('v140_k6.patch').read_text()
+          forbidden=[x for x in ['V139','V134','Strata','V140P0','V140Box','V140Has'] if x in patch]
+          rm,lm=run(['lake','build','Specimen.DeriveConstrainedProducer'],'v140_k6_module.log') if rk6==0 else (99,lk6)
+          if rm==0:
+              rd,ld=run(['lake','env','lean','/tmp/V140Direct.lean'],'v140_k6_direct.log')
+              rg,lg=run(['lake','env','lean','/tmp/V140Generic.lean'],'v140_k6_generic.log')
+          else:
+              rd,ld=99,lm; rg,lg=99,lm
+              pathlib.Path('v140_k6_direct.log').write_text(lm)
+              pathlib.Path('v140_k6_generic.log').write_text(lm)
+          direct_class=classify(rd,ld); generic_class=classify(rg,lg)
+          out['k6']={'apply_rc':rk6,'module_rc':rm,'direct_rc':rd,'direct_class':direct_class,'generic_rc':rg,'generic_class':generic_class,'forbidden_patch_tokens':forbidden}
+
+          # Protected surface only after K6 compiles.
+          if rm==0:
+              rbuild,lbuild=run(['lake','build'],'v140_full_build.log',timeout=3600)
+              rtest,ltest=run(['lake','test'],'v140_full_test.log',timeout=3600) if rbuild==0 else (99,'skipped after build failure')
+          else:
+              rbuild=rtest=99
+              pathlib.Path('v140_full_build.log').write_text('skipped: K6 module did not build\n')
+              pathlib.Path('v140_full_test.log').write_text('skipped: K6 module did not build\n')
+          out['protected']={'build_rc':rbuild,'test_rc':rtest}
+
+          # Causal ablation: restore source, retain exact K2+K5.
+          run(['git','checkout','--','Specimen/DeriveConstrainedProducer.lean'],'v140_ablation_restore.log')
+          run(['python','scripts/v120_apply_binder_aware_fixed_parameter.py'],'v140_ablation_k2.log')
+          run(['python','scripts/v132_apply_output_dependent_input_determined.py'],'v140_ablation_k5.log')
+          ra_mod,la_mod=run(['lake','build','Specimen.DeriveConstrainedProducer'],'v140_ablation_module.log')
+          ra,la=run(['lake','env','lean','/tmp/V140Direct.lean'],'v140_ablation_direct.log') if ra_mod==0 else (99,la_mod)
+          ablation_class=classify(ra,la)
+          out['ablation']={'module_rc':ra_mod,'direct_rc':ra,'direct_class':ablation_class}
+
+          gates={
+            'K1_baseline_reproduces_non_fvar': baseline_class=='NON_FVAR_APPLICABILITY',
+            'K2_k6_module_builds': rm==0,
+            'K3_k6_removes_non_fvar': rm==0 and direct_class!='NON_FVAR_APPLICABILITY',
+            'K5_generic_not_silently_specialized': generic_class=='SYMBOLIC_INSTANCE',
+            'K6_full_protected_pass': rbuild==0 and rtest==0,
+            'K7_ablation_restores_non_fvar': ablation_class=='NON_FVAR_APPLICABILITY',
+            'K8_patch_generic': not forbidden,
+          }
+          out['gates']=gates
+          common=all(gates.values())
+          if common and direct_class=='PASS':
+              verdict='PASS_V140_K6_AND_NULL_SPECIALIZATION_BARRIER'
+          elif common and direct_class=='SYMBOLIC_INSTANCE':
+              verdict='PASS_V140_K6_AND_ISOLATE_SPECIALIZATION_BARRIER'
+          elif not gates['K2_k6_module_builds']:
+              verdict='RESIDUAL_V140_K6_IMPLEMENTATION_OR_COMPOSITION'
+          elif not gates['K6_full_protected_pass']:
+              verdict='INVALID_V140_PROTECTED_REGRESSION'
+          elif not gates['K3_k6_removes_non_fvar']:
+              verdict='NULL_V140_K6_NO_CAUSAL_EFFECT'
+          else:
+              verdict='RESIDUAL_V140_OTHER'
+          out['verdict']=verdict
+          out['claim_boundary']='Bounded K6 admission under pinned Specimen. Scientific PASS requires acquisition, protected replay and causal ablation.'
+          pathlib.Path('v140_result.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+
+      - name: Show result
+        if: always()
+        run: |
+          cat v140_result.json || true
+          cat v140_k6_module.log || true
+          cat v140_k6_direct.log || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v140-k6-fixed-argument-preservation
+          path: |
+            v140_result.json
+            v140_*.log
+            v140_k6.patch
