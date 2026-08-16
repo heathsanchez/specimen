@@ -1,0 +1,138 @@
+name: V165 V164 apparatus repair
+
+on:
+  push:
+    branches: ["v165-v164-apparatus-repair"]
+    paths:
+      - '.github/workflows/v165-v164-apparatus-repair.yml'
+      - 'experiments/V165_V164_APPARATUS_REPAIR_PREREG.md'
+      - 'scripts/v164_apply_live_output_type_reconstruction.py'
+  workflow_dispatch:
+
+jobs:
+  reconstruction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact admitted K2 K5 only
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Freeze exact V164 fixtures
+        run: |
+          cat > /tmp/V165D0.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V165P0 where A : Type
+          inductive V165R0 (p : V165P0) : Option p.A → Prop where
+            | none : V165R0 p none
+          derive_generator (fun (p : V165P0) => ∃ x : Option p.A, V165R0 p x)
+          EOF
+          cat > /tmp/V165D1.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V165P1 where A : Type
+          inductive V165R1 (p : V165P1) : Option p.A → Prop where
+            | some (a : p.A) : V165R1 p (some a)
+          derive_generator (fun (p : V165P1) => ∃ x : Option p.A, V165R1 p x)
+          EOF
+          cat > /tmp/V165C.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          inductive V165RC (α : Type) : Option α → Prop where
+            | some (a : α) : V165RC α (some a)
+          derive_generator (fun (α : Type) => ∃ x : Option α, V165RC α x)
+          EOF
+          cat > /tmp/V165REC.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V165Schema where Atom : Type
+          inductive V165Seq (s : V165Schema) : Nat → List s.Atom → Prop where
+            | nil : V165Seq s 0 []
+            | cons (x : s.Atom) {n : Nat} {xs : List s.Atom} : V165Seq s n xs → V165Seq s (Nat.succ n) (x :: xs)
+          derive_generator (fun (s : V165Schema) (n : Nat) => ∃ xs : List s.Atom, V165Seq s n xs)
+          EOF
+      - name: Reproduce V164 ablations
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          out={}
+          for name in ['D0','D1']:
+            p=subprocess.run(['lake','env','lean',f'/tmp/V165{name}.lean'],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v165_A_{name}.log').write_text(log); lo=log.lower()
+            c='PASS' if p.returncode==0 else ('FREE_FVAR' if 'unknown free variable' in lo else 'OTHER_FAILURE')
+            out[name]={'rc':p.returncode,'class':c,'tail':log[-8000:]}
+          pathlib.Path('v165_ablation.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Apply exact V164 candidate with repaired locator
+        run: |
+          python scripts/v164_apply_live_output_type_reconstruction.py > v165_apply.log
+          cat v165_apply.log
+          grep -q 'V164_LIVE_OUTPUT_TYPE_RECONSTRUCTION_APPLIED' v165_apply.log
+          git diff -- Specimen/DeriveConstrainedProducer.lean > v165_candidate.patch
+          test -s v165_candidate.patch
+          if grep -Eq 'V165P0|V165P1|V165Schema|V165Seq' v165_candidate.patch; then
+            echo fixture-specific-token-leak
+            exit 165
+          fi
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Run repaired V164 intervention arms
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          out={}
+          for name in ['D0','D1','C','REC']:
+            p=subprocess.run(['lake','env','lean',f'/tmp/V165{name}.lean'],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v165_I_{name}.log').write_text(log); lo=log.lower()
+            if p.returncode==0:c='PASS'
+            elif 'unknown free variable' in lo:c='FREE_FVAR'
+            elif 'failed to synthesize' in lo:c='SYNTH_FAILURE'
+            elif 'unable to derive producer schedule' in lo or 'cannot derive constrained producer' in lo:c='SCHEDULE_FAILURE'
+            else:c='OTHER_FAILURE'
+            out[name]={'rc':p.returncode,'class':c,'tail':log[-12000:]}
+          pathlib.Path('v165_intervention.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Protected suite
+        continue-on-error: true
+        run: |
+          set +e; lake build > v165_build.log 2>&1; B=$?; lake test > v165_test.log 2>&1; T=$?; set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v165_protected.json
+          exit 0
+      - name: Frozen V165 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def load(p): return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
+          a=load('v165_ablation.json'); i=load('v165_intervention.json'); p=load('v165_protected.json')
+          patch=pathlib.Path('v165_candidate.patch')
+          applied=patch.exists() and patch.stat().st_size>0 and pathlib.Path('v165_apply.log').exists() and 'V164_LIVE_OUTPUT_TYPE_RECONSTRUCTION_APPLIED' in pathlib.Path('v165_apply.log').read_text()
+          if a is None or i is None or p is None or not applied:v='R10_CANDIDATE_NOT_APPLIED'
+          elif a['D0']['class']!='FREE_FVAR' or a['D1']['class']!='FREE_FVAR':v='R10_ABLATION_NOT_REPRODUCED'
+          elif p.get('build')!=0 or p.get('test')!=0:v='R10_PROTECTED_FAILURE'
+          elif i['D0']['class']=='PASS' and i['D1']['class']!='FREE_FVAR' and i['REC']['class']!='FREE_FVAR' and i['C']['class']=='PASS':v='PASS_V165_LIVE_OUTPUT_TYPE_RECONSTRUCTION_CAUSAL'
+          else:v='NEGATIVE_V165_RECONSTRUCTION_NOT_SUFFICIENT'
+          r={'canonical_id':'V165_V164_APPARATUS_REPAIR','candidate_applied':applied,'ablation':None if a is None else {k:x['class'] for k,x in a.items()},'intervention':None if i is None else {k:x['class'] for k,x in i.items()},'protected':p,'verdict':v,'claim_boundary':'Apparatus repair of source-informed stale output-type binder experiment only.'}
+          pathlib.Path('v165_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v165_result.json || true
+          cat v165_apply.log || true
+          for f in v165_A_*.log v165_I_*.log; do [ -f "$f" ] && { echo ==== $f ====; cat "$f"; }; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v165-v164-apparatus-repair
+          path: v165_*
