@@ -1,0 +1,51 @@
+name: V163 equality checker closure separator
+on:
+  push:
+    branches: ["v163-equality-checker-closure-separator"]
+    paths: ['.github/workflows/v163-equality-checker-closure-separator.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: default, test: false, lint: false}
+      - name: Freeze and qualify
+        run: |
+          sha256sum protocols/V163_EQUALITY_CHECKER_CLOSURE_SEPARATOR.md fixtures/V163_EQUALITY_CHECKER_SEPARATOR.lean | tee v163_hashes.txt
+          lake build Plausible Specimen
+      - name: Run separator
+        run: |
+          set +e
+          lake env lean fixtures/V163_EQUALITY_CHECKER_SEPARATOR.lean > v163.log 2>&1
+          RC=$?
+          set -e
+          python - <<'PY'
+          import json,pathlib
+          rc=int('${{ env.DUMMY || 0 }}') if False else int(pathlib.Path('v163_rc.tmp').read_text()) if pathlib.Path('v163_rc.tmp').exists() else None
+          PY
+          echo "$RC" > v163_rc.txt
+          python - <<'PY'
+          import json,pathlib
+          rc=int(pathlib.Path('v163_rc.txt').read_text().strip())
+          log=pathlib.Path('v163.log').read_text(errors='replace')
+          lo=log.lower()
+          apparatus=any(x in lo for x in ['unknown module prefix','object file'])
+          if apparatus: verdict='R10_V163_INCONCLUSIVE'
+          elif rc==0: verdict='PASS_V163_STRUCTURAL_EQUALITY_CHECKER_EXISTS'
+          else: verdict='FAIL_V163_NO_STRUCTURAL_EQUALITY_CHECKER'
+          out={'canonical_id':'V163_EQUALITY_CHECKER_CLOSURE_SEPARATOR','rc':rc,'apparatus':apparatus,'verdict':verdict,'log_tail':log[-5000:]}
+          pathlib.Path('v163_result.json').write_text(json.dumps(out,indent=2)+'\n')
+          print(json.dumps(out,indent=2))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v163_result.json || true
+          tail -160 v163.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: v163-equality-checker-separator, path: 'v163*', retention-days: 90}
