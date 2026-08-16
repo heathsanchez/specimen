@@ -1,0 +1,104 @@
+name: V151 K6 specialization separator
+
+on:
+  push:
+    branches: ["v151-k6-specialization-separator"]
+    paths:
+      - '.github/workflows/v151-k6-specialization-separator.yml'
+      - 'experiments/V151_K6_SPECIALIZATION_SEPARATOR_PREREG.md'
+  workflow_dispatch:
+
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact admitted K2 K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Freeze A B C fixtures
+        run: |
+          cat > /tmp/V151Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V151P where Meta : Type
+          def V151P0 : V151P := ⟨Unit⟩
+          inductive V151Box (p : V151P) : Type where | mk : p.Meta → V151Box p
+          inductive V151Has {p : V151P} : V151Box p → Prop where | mk (x : p.Meta) : V151Has (V151Box.mk x)
+          EOF
+          cp /tmp/V151Common.lean /tmp/V151A.lean
+          cat >> /tmp/V151A.lean <<'EOF'
+          #synth Plausible.Arbitrary V151P0.Meta
+          EOF
+          cp /tmp/V151Common.lean /tmp/V151B.lean
+          cat >> /tmp/V151B.lean <<'EOF'
+          instance (p : V151P) [Plausible.Arbitrary p.Meta] : ArbitrarySizedSuchThat (V151Box p) (fun b => V151Has b) where
+            arbitrarySizedST := fun _ => do
+              let x : p.Meta ← Plausible.Arbitrary.arbitrary
+              pure (V151Box.mk x)
+          #synth ArbitrarySizedSuchThat (V151Box V151P0) (fun b => V151Has b)
+          EOF
+          cp /tmp/V151Common.lean /tmp/V151C.lean
+          cat >> /tmp/V151C.lean <<'EOF'
+          derive_generator (fun (p : V151P) => ∃ b : V151Box p, V151Has b)
+          #synth ArbitrarySizedSuchThat (V151Box V151P0) (fun b => V151Has b)
+          EOF
+      - name: Run A and B old-language separators
+        run: |
+          python - <<'PY'
+          import json,subprocess,pathlib
+          out={}
+          for n in ['A','B']:
+            p=subprocess.run(['lake','env','lean',f'/tmp/V151{n}.lean'],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v151_{n}.log').write_text(log)
+            out[n]={'rc':p.returncode,'pass':p.returncode==0,'tail':log[-4000:]}
+          pathlib.Path('v151_ab.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Apply exact V150 mechanism for C only
+        run: |
+          python scripts/v148_apply_k6_requirement_threading.py
+          python scripts/v150_apply_inner_requirement_propagation.py
+          lake build Specimen.MakeConstrainedProducerInstance Specimen.DeriveConstrainedProducer
+      - name: Run C Specimen-emitted specialization
+        run: |
+          python - <<'PY'
+          import json,subprocess,pathlib
+          p=subprocess.run(['lake','env','lean','/tmp/V151C.lean'],capture_output=True,text=True)
+          log=p.stdout+p.stderr; pathlib.Path('v151_C.log').write_text(log)
+          o={'rc':p.returncode,'pass':p.returncode==0,'tail':log[-8000:]}; pathlib.Path('v151_c.json').write_text(json.dumps(o,indent=2)+'\n'); print(json.dumps(o,indent=2))
+          PY
+      - name: Frozen V151 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          ab=json.loads(pathlib.Path('v151_ab.json').read_text()) if pathlib.Path('v151_ab.json').exists() else None
+          c=json.loads(pathlib.Path('v151_c.json').read_text()) if pathlib.Path('v151_c.json').exists() else None
+          if ab is None or c is None:r={'verdict':'R10_INCONCLUSIVE'}
+          else:
+            A=ab['A']['pass']; B=ab['B']['pass']; C=c['pass']
+            if not A:v='V151_ORDINARY_DEPENDENT_PREMISE_RESIDUAL'
+            elif not B:v='V151_GENERIC_CONDITIONAL_HEAD_RESIDUAL'
+            elif not C:v='V151_SPECIMEN_EMISSION_REGISTRATION_RESIDUAL'
+            else:v='V151_SPECIALIZATION_BARRIER_CLEARED_NOT_ADMITTED'
+            r={'canonical_id':'V151_K6_SPECIALIZATION_SEPARATOR','A_direct_premise':A,'B_manual_conditional':B,'C_specimen_conditional':C,'verdict':v}
+          pathlib.Path('v151_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v151_result.json || true
+          for f in v151_A.log v151_B.log v151_C.log; do [ -f "$f" ] && { echo ==== $f ====; tail -n 160 "$f"; }; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v151-k6-specialization-separator
+          path: v151_*
