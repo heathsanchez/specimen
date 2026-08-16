@@ -1,0 +1,105 @@
+name: V134 specialization instance discriminator
+
+on:
+  push:
+    branches: ["v134-specialization-instance-discriminator"]
+  workflow_dispatch:
+
+jobs:
+  discriminator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+
+      - name: Apply admitted K2 and K5 unchanged
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+
+      - name: Freeze controlled V134 fixture files
+        run: |
+          cat > /tmp/V134Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+
+          structure V134P where
+            Meta : Type
+
+          def V134P0 : V134P := ⟨Unit⟩
+
+          inductive V134Box (p : V134P) : Type where
+          | mk : p.Meta → V134Box p
+
+          inductive V134Has {p : V134P} : V134Box p → Prop where
+          | mk (x : p.Meta) : V134Has (V134Box.mk x)
+          EOF
+          cp /tmp/V134Common.lean /tmp/V134Generic.lean
+          cat >> /tmp/V134Generic.lean <<'EOF'
+
+          derive_mutual (fun (p : V134P) => ∃ b : V134Box p, V134Has b)
+          EOF
+          cp /tmp/V134Common.lean /tmp/V134Fixed.lean
+          cat >> /tmp/V134Fixed.lean <<'EOF'
+
+          derive_mutual (fun (_ : Unit) => ∃ b : V134Box V134P0, V134Has b)
+          EOF
+
+      - name: Execute frozen arms
+        shell: bash
+        run: |
+          set +e
+          lake env lean /tmp/V134Generic.lean > v134_generic.log 2>&1
+          GENERIC=$?
+          lake env lean /tmp/V134Fixed.lean > v134_fixed.log 2>&1
+          FIXED=$?
+          set -e
+          echo "GENERIC=$GENERIC FIXED=$FIXED"
+          cat v134_generic.log
+          echo '--- FIXED ---'
+          cat v134_fixed.log
+          python - <<'PY'
+          import json, pathlib, re, subprocess
+          def rc(path):
+              p=subprocess.run(['lake','env','lean',path],capture_output=True,text=True)
+              return p.returncode,p.stdout+p.stderr
+          grc,g=rc('/tmp/V134Generic.lean')
+          frc,f=rc('/tmp/V134Fixed.lean')
+          generic_parameter_dependent = grc != 0 and ('Arbitrary' in g or 'Synth' in g or 'instance' in g.lower())
+          fixed_symbolic_obligation = frc != 0 and ('Arbitrary' in f or 'Synth' in f or 'instance' in f.lower())
+          fixed_mentions_meta = 'Meta' in f
+          if grc == 0:
+              verdict='NULL_V134_GENERIC_ALREADY_SOLVED'
+          elif frc == 0:
+              verdict='NULL_V134_SPECIALIZATION_ELIMINATES_OBLIGATION'
+          elif generic_parameter_dependent and fixed_symbolic_obligation:
+              verdict='PASS_V134_SPECIALIZATION_BEFORE_INSTANCE_SYNTHESIS_DISCRIMINATOR'
+          else:
+              verdict='INCONCLUSIVE_V134_DIAGNOSTIC_SHAPE'
+          out={
+            'canonical_id':'V134_FIXED_SPECIALIZATION_INSTANCE_DISCRIMINATOR',
+            'generic_rc':grc,'fixed_rc':frc,
+            'generic_parameter_dependent':generic_parameter_dependent,
+            'fixed_symbolic_obligation':fixed_symbolic_obligation,
+            'fixed_mentions_meta':fixed_mentions_meta,
+            'verdict':verdict,
+            'claim_boundary':'Controlled discriminator only. A PASS identifies a barrier coordinate; it does not admit a K6 repair.'
+          }
+          pathlib.Path('v134_result.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v134-specialization-instance-discriminator
+          path: |
+            v134_result.json
+            v134_generic.log
+            v134_fixed.log
