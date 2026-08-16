@@ -60,10 +60,6 @@ jobs:
           lake env lean /tmp/V168_I0.lean > v168_I0.log 2>&1
           RC=$?
           set -e
-          python - <<'PY'
-          import json,pathlib,re
-          rc=int('${{ job.status == "success" }}'=='true') if False else int(pathlib.Path('/dev/null').exists())
-          PY
           echo "$RC" > v168_I0_rc.txt
           tail -n 260 v168_I0.log
           exit 0
