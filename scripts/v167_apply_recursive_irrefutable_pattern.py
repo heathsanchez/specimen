@@ -20,7 +20,10 @@ private partial def patternIrrefutable (pattern : Pattern) : MetaM Bool := do
     if inductInfo.ctors.length != 1 then
       pure false
     else
-      args.allM patternIrrefutable
+      for arg in args do
+        if !(← patternIrrefutable arg) then
+          return false
+      pure true
 '''
 if anchor not in s:
     raise SystemExit('K7R_HELPER_ANCHOR_NOT_FOUND')
