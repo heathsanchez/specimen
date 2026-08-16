@@ -1,0 +1,133 @@
+name: V168 K7S certified constructor irrefutability
+on:
+  push:
+    branches: ["v168-k7s-certified-constructor-irrefutability"]
+    paths: ['.github/workflows/v168-k7s-certified-constructor-irrefutability.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: default, test: false, lint: false}
+
+      - name: Freeze identities
+        run: |
+          set -euo pipefail
+          sha256sum protocols/V168_K7S_CERTIFIED_CONSTRUCTOR_IRREFUTABILITY.md \
+            fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean \
+            fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean \
+            fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean \
+            scripts/v168_apply_certified_constructor_irrefutability.py \
+            scripts/v120_apply_binder_aware_fixed_parameter.py \
+            scripts/v132_apply_output_dependent_input_determined.py \
+            scripts/v156_apply_requirement_provenance_promotion.py \
+            scripts/v156b_apply_checker_consumer_compat.py \
+            scripts/v158_apply_scope_dependent_promotion.py | tee v168_hashes.txt
+
+      - name: Define helpers
+        run: |
+          cat > /tmp/v168_helpers.sh <<'SH'
+          set -euo pipefail
+          apply_prior() {
+            python scripts/v120_apply_binder_aware_fixed_parameter.py
+            python scripts/v132_apply_output_dependent_input_determined.py
+            python scripts/v156_apply_requirement_provenance_promotion.py
+            python scripts/v156b_apply_checker_consumer_compat.py
+            python scripts/v158_apply_scope_dependent_promotion.py
+          }
+          clean_source() { git checkout HEAD -- Specimen SpecimenTest; rm -rf .lake/build; }
+          fixture() { local f="$1" o="$2"; set +e; lake env lean "$f" > "$o.log" 2>&1; echo "$?" > "$o.rc"; set -e; }
+          SH
+
+      - name: Arm A
+        run: |
+          source /tmp/v168_helpers.sh
+          clean_source
+          apply_prior > v168_A_apply.log
+          lake build Plausible Specimen > v168_A_build.log 2>&1
+          fixture fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean v168_A_natural
+          fixture fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean v168_A_heldout
+          fixture fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean v168_A_safety
+
+      - name: Arm B K7S
+        run: |
+          source /tmp/v168_helpers.sh
+          clean_source
+          apply_prior > v168_B_prior.log
+          cp Specimen/MExp.lean /tmp/v168_pre_MExp.lean
+          python scripts/v168_apply_certified_constructor_irrefutability.py | tee v168_B_k7s.log
+          diff -u /tmp/v168_pre_MExp.lean Specimen/MExp.lean > v168_B_k7s_only.diff || true
+          test -s v168_B_k7s_only.diff
+          if grep -E 'V165|V166|V167|V168|ISSUE12|Issue12|Cedar|StateResult|Packet|Choice|fixtures/' v168_B_k7s_only.diff; then exit 91; fi
+          set +e
+          lake build > v168_B_build.log 2>&1; echo "$?" > v168_B_build.rc
+          set -e
+          fixture fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean v168_B_natural
+          fixture fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean v168_B_heldout
+          fixture fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean v168_B_safety
+          set +e
+          lake test > v168_B_test.log 2>&1; echo "$?" > v168_B_test.rc
+          set -e
+
+      - name: Arm C ablation
+        run: |
+          source /tmp/v168_helpers.sh
+          clean_source
+          apply_prior > v168_C_apply.log
+          lake build Plausible Specimen > v168_C_build.log 2>&1
+          fixture fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean v168_C_natural
+          fixture fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean v168_C_heldout
+          fixture fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean v168_C_safety
+
+      - name: Classify V168
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,re,pathlib
+          def arm(p):
+            rp=pathlib.Path(p+'.rc'); lp=pathlib.Path(p+'.log')
+            rc=int(rp.read_text()) if rp.exists() else None
+            log=lp.read_text(errors='replace') if lp.exists() else ''
+            lo=log.lower()
+            return {'rc':rc,'redundant':('redundantmatchalt' in lo or 'redundant alternative' in lo),'apparatus':any(x in lo for x in ['unknown module prefix','object file']),'tail':log[-1800:]}
+          A=[arm(x) for x in ['v168_A_natural','v168_A_heldout','v168_A_safety']]
+          B=[arm(x) for x in ['v168_B_natural','v168_B_heldout','v168_B_safety']]
+          C=[arm(x) for x in ['v168_C_natural','v168_C_heldout','v168_C_safety']]
+          def rc(p):
+            q=pathlib.Path(p); return int(q.read_text()) if q.exists() else None
+          bb,bt=rc('v168_B_build.rc'),rc('v168_B_test.rc')
+          testlog=pathlib.Path('v168_B_test.log').read_text(errors='replace') if pathlib.Path('v168_B_test.log').exists() else ''
+          # Capture diagnostic/error-bearing lines for an explicit post-run separator.
+          error_lines=[ln for ln in testlog.splitlines() if ('error:' in ln.lower() or '✖' in ln or '❌' in ln)]
+          pathlib.Path('v168_B_error_lines.txt').write_text('\n'.join(error_lines)+'\n')
+          nonctor_tokens=['`StateResult` is not a constructor','`Nat` is not a constructor','`List` is not a constructor','`String` is not a constructor','`CedarExpr` is not a constructor']
+          old_nonctor_crashes=any(t in testlog for t in nonctor_tokens)
+          guard_mismatch=('Docstring on `#guard_msgs` does not match generated message' in testlog)
+          causal=(A[0]['rc'] not in (None,0) and A[0]['redundant'] and A[1]['rc'] not in (None,0) and A[1]['redundant'] and A[2]['rc']==0 and
+                  B[0]['rc']==0 and B[1]['rc']==0 and B[2]['rc']==0 and
+                  C[0]['rc'] not in (None,0) and C[0]['redundant'] and C[1]['rc'] not in (None,0) and C[1]['redundant'] and C[2]['rc']==0)
+          apparatus=any(x['apparatus'] for x in A+B+C)
+          if apparatus: verdict='R10_V168_INCONCLUSIVE'
+          elif causal and bb==0 and bt==0: verdict='PASS_V168_K7S_ADMITTED_BOUNDED_NATURAL_CONSTRUCTOR_DEVELOPMENT'
+          elif causal and bb==0 and bt!=0 and guard_mismatch and not old_nonctor_crashes: verdict='SEPARATOR_V168_NONCONSTRUCTOR_CRASHES_ELIMINATED_REMAINING_TEST_FAILURES_REQUIRE_CLASSIFICATION'
+          else: verdict='FAIL_V168_K7S_NOT_ELIGIBLE'
+          out={'canonical_id':'V168_K7S_CERTIFIED_CONSTRUCTOR_IRREFUTABILITY','apparatus':apparatus,'causal_gates_pass':causal,'B_build_rc':bb,'B_test_rc':bt,'old_nonconstructor_crashes_present':old_nonctor_crashes,'guard_mismatch_present':guard_mismatch,'error_line_count':len(error_lines),'arms':{'A':A,'B':B,'C':C},'verdict':verdict}
+          pathlib.Path('v168_result.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          if verdict.startswith('FAIL') or verdict.startswith('R10'): raise SystemExit(1)
+          PY
+
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v168_result.json || true
+          cat v168_B_error_lines.txt || true
+          tail -220 v168_B_test.log 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: v168-k7s-certified-constructor-irrefutability, path: 'v168*', retention-days: 90}
