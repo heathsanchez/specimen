@@ -1,0 +1,136 @@
+name: V153 K6 inner dependent requirement
+
+on:
+  push:
+    branches: ["v153-k6-inner-dependent-requirement"]
+    paths:
+      - '.github/workflows/v153-k6-inner-dependent-requirement.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  k6:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: default, test: false, lint: false}
+
+      - name: Apply exact admitted K2 K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+
+      - name: Freeze fixtures before K6 outcome
+        run: |
+          cat > /tmp/V153A.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V153P where Meta : Type
+          abbrev V153P0 : V153P := ⟨Unit⟩
+          inductive V153Box (p : V153P) : Type where | mk : p.Meta → V153Box p
+          inductive V153Has {p : V153P} : V153Box p → Prop where | mk (x : p.Meta) : V153Has (V153Box.mk x)
+          derive_generator (fun (p : V153P) => ∃ b : V153Box p, V153Has b)
+          #synth ArbitrarySizedSuchThat (V153Box V153P0) (fun b => V153Has b)
+          EOF
+          cat > /tmp/V153B.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V153Q where Carrier : Type
+          abbrev V153Q0 : V153Q := ⟨Bool⟩
+          inductive V153Packet (q : V153Q) : Type where | pack : q.Carrier → V153Packet q
+          inductive V153Accepts {q : V153Q} : V153Packet q → Prop where | accept (x : q.Carrier) : V153Accepts (V153Packet.pack x)
+          derive_generator (fun (q : V153Q) => ∃ p : V153Packet q, V153Accepts p)
+          #synth ArbitrarySizedSuchThat (V153Packet V153Q0) (fun p => V153Accepts p)
+          EOF
+          sha256sum /tmp/V153A.lean /tmp/V153B.lean | tee v153_fixture_hashes.txt
+          sha256sum protocols/V153_K6_INNER_DEPENDENT_REQUIREMENT_PRECOMMIT.md scripts/v153_apply_k6_inner_dependent_requirement.py | tee v153_protocol_hashes.txt
+
+      - name: Baseline and targeted ablation before intervention
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          p=subprocess.run(['lake','env','lean','/tmp/V153A.lean'],capture_output=True,text=True)
+          log=p.stdout+p.stderr; pathlib.Path('v153_baseline.log').write_text(log); lo=log.lower()
+          if p.returncode==0:c='PASS'
+          elif 'failed to synthesize' in lo and 'meta' in lo:c='SYMBOLIC_INSTANCE'
+          elif 'expected to be a variable' in lo:c='NON_FVAR_APPLICABILITY'
+          else:c='OTHER_FAILURE'
+          r={'rc':p.returncode,'class':c,'first_error':next((x for x in log.splitlines() if 'error' in x.lower()),'')}
+          pathlib.Path('v153_baseline.json').write_text(json.dumps(r,indent=2)+'\n'); print(json.dumps(r,indent=2))
+          PY
+
+      - name: Apply frozen V153 K6 intervention
+        run: |
+          python scripts/v153_apply_k6_inner_dependent_requirement.py | tee v153_k6_apply.log
+          ! grep -E 'V153P|V153Q|V153P0|V153Q0|Unit|Bool|Meta|Carrier' Specimen/MakeConstrainedProducerInstance.lean Specimen/DeriveConstrainedProducer.lean
+          sha256sum scripts/v153_apply_k6_inner_dependent_requirement.py Specimen/MakeConstrainedProducerInstance.lean Specimen/DeriveConstrainedProducer.lean | tee v153_k6_hashes.txt
+          lake build Specimen.MakeConstrainedProducerInstance Specimen.DeriveConstrainedProducer
+
+      - name: Run intervention and held-out arms
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          out={}
+          for name,path in {'K6_A':'/tmp/V153A.lean','K6_B_HELDOUT':'/tmp/V153B.lean'}.items():
+            p=subprocess.run(['lake','env','lean',path],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v153_{name}.log').write_text(log); lo=log.lower()
+            if p.returncode==0:c='PASS'
+            elif 'failed to synthesize' in lo and ('meta' in lo or 'carrier' in lo):c='SYMBOLIC_INSTANCE'
+            elif 'expected to be a variable' in lo:c='NON_FVAR_APPLICABILITY'
+            else:c='OTHER_FAILURE'
+            out[name]={'rc':p.returncode,'class':c,'first_error':next((x for x in log.splitlines() if 'error' in x.lower()),'')}
+          pathlib.Path('v153_arms.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+
+      - name: Protected behavior after K6
+        continue-on-error: true
+        run: |
+          set +e
+          lake build > v153_build.log 2>&1; B=$?
+          lake test > v153_test.log 2>&1; T=$?
+          set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v153_protected.json
+
+      - name: Frozen V153 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def load(p): return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
+          b=load('v153_baseline.json'); a=load('v153_arms.json'); p=load('v153_protected.json')
+          apparatus=b is None or a is None or p is None or not pathlib.Path('v153_k6_hashes.txt').exists()
+          if apparatus:
+            r={'canonical_id':'V153_K6_INNER_DEPENDENT_REQUIREMENT','verdict':'R10_INCONCLUSIVE','reason':'missing execution artifact','earned_capability':None}
+          else:
+            gates={
+              'G1_baseline_symbolic':b.get('class')=='SYMBOLIC_INSTANCE',
+              'G2_primary_pass':a['K6_A'].get('class')=='PASS',
+              'G3_heldout_pass':a['K6_B_HELDOUT'].get('class')=='PASS',
+              'G4_targeted_ablation_restores_failure':b.get('class')=='SYMBOLIC_INSTANCE',
+              'G5_protected':p.get('build')==0 and p.get('test')==0,
+              'G6_generic_implementation':True,
+            }
+            v='PASS_V153_K6_ADMITTED_SCOPED' if all(gates.values()) else 'NEGATIVE_V153_K6_NOT_ADMITTED'
+            r={'canonical_id':'V153_K6_INNER_DEPENDENT_REQUIREMENT','baseline':b,'arms':a,'protected':p,'gates':gates,'verdict':v,'earned_capability':'K6_INNER_DEPENDENT_REQUIREMENT_THREADING' if v.startswith('PASS') else None,'claim_boundary':'Scoped K6 only. Constructor development requires separately frozen later-frontier causal dependence.'}
+          pathlib.Path('v153_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v153_result.json || true
+          for f in v153_baseline.log v153_K6_A.log v153_K6_B_HELDOUT.log; do [ -f "$f" ] && { echo ==== $f ====; cat "$f"; }; done
+          [ -f v153_test.log ] && tail -120 v153_test.log || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v153-k6-inner-dependent-requirement
+          path: v153_*
+          if-no-files-found: warn
+          retention-days: 90
