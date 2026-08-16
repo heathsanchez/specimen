@@ -1,0 +1,90 @@
+name: V174 protected failure differential
+on:
+  push:
+    branches: ["v174-protected-failure-differential"]
+    paths: ['.github/workflows/v174-protected-failure-differential.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: false, test: false, lint: false}
+      - name: Freeze apparatus
+        run: |
+          set -euo pipefail
+          lake --version
+          sha256sum protocols/V174_PROTECTED_FAILURE_DIFFERENTIAL.md \
+            scripts/v120_apply_binder_aware_fixed_parameter.py scripts/v132_apply_output_dependent_input_determined.py \
+            scripts/v156_apply_requirement_provenance_promotion.py scripts/v156b_apply_checker_consumer_compat.py \
+            scripts/v158_apply_scope_dependent_promotion.py scripts/v168_apply_certified_constructor_irrefutability.py \
+            scripts/v173_apply_standalone_producer_typeparam_pruning.py | tee v174_hashes.txt
+      - name: Define helpers
+        run: |
+          cat > /tmp/v174.sh <<'SH'
+          set -euo pipefail
+          prior() {
+            python scripts/v120_apply_binder_aware_fixed_parameter.py
+            python scripts/v132_apply_output_dependent_input_determined.py
+            python scripts/v156_apply_requirement_provenance_promotion.py
+            python scripts/v156b_apply_checker_consumer_compat.py
+            python scripts/v158_apply_scope_dependent_promotion.py
+            python scripts/v168_apply_certified_constructor_irrefutability.py
+          }
+          clean() { git checkout HEAD -- Specimen SpecimenTest; rm -rf .lake/build; }
+          run_suite() {
+            local p="$1"
+            set +e
+            lake test > "$p.log" 2>&1
+            echo $? > "$p.rc"
+            set -e
+            grep '^[-] SpecimenTest\.' "$p.log" | sed 's/^- //' | sort -u > "$p.failures" || true
+          }
+          SH
+      - name: Arm A full protected prior stack
+        run: |
+          source /tmp/v174.sh
+          clean; prior > v174_A_apply.log 2>&1
+          lake build Plausible Specimen > v174_A_build.log 2>&1
+          run_suite v174_A_test
+      - name: Arm B full protected scoped pruning
+        run: |
+          source /tmp/v174.sh
+          clean; prior > v174_B_prior.log 2>&1
+          python scripts/v173_apply_standalone_producer_typeparam_pruning.py | tee v174_B_prune.log
+          grep -q V173_STANDALONE_PRODUCER_TYPEPARAM_PRUNING_APPLIED v174_B_prune.log
+          lake build Plausible Specimen > v174_B_build.log 2>&1
+          run_suite v174_B_test
+      - name: Frozen V174 classification
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def rc(p):
+            x=pathlib.Path(p); return int(x.read_text().strip()) if x.exists() else None
+          def failures(p):
+            x=pathlib.Path(p); return [s for s in x.read_text().splitlines() if s.strip()] if x.exists() else None
+          A=failures('v174_A_test.failures'); B=failures('v174_B_test.failures')
+          ar=rc('v174_A_test.rc'); br=rc('v174_B_test.rc')
+          apparatus = any(x is None for x in [A,B,ar,br])
+          added=sorted(set(B or [])-set(A or [])); removed=sorted(set(A or [])-set(B or []))
+          identical=(A==B and ar==br) if not apparatus else False
+          if apparatus: verdict='R10_V174_INCONCLUSIVE'
+          elif identical: verdict='PASS_V174_PROTECTED_FAILURES_IDENTICAL'
+          elif added: verdict='NEGATIVE_V174_PRUNING_ADDS_PROTECTED_FAILURES'
+          else: verdict='SEPARATOR_V174_PROTECTED_DIFFERENTIAL_CHANGED'
+          out={'canonical_id':'V174_PROTECTED_FAILURE_DIFFERENTIAL','apparatus':apparatus,'A_rc':ar,'B_rc':br,'A_failures':A,'B_failures':B,'added':added,'removed':removed,'identical':identical,'verdict':verdict}
+          pathlib.Path('v174_result.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v174_result.json || true
+          echo A; cat v174_A_test.failures 2>/dev/null || true
+          echo B; cat v174_B_test.failures 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: v174-protected-failure-differential, path: 'v174*', retention-days: 90}
