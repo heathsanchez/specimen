@@ -1,0 +1,97 @@
+name: V146 let-bound fixed old-closure separator
+
+on:
+  push:
+    branches: ["v146-let-bound-fixed-closure"]
+    paths: ['.github/workflows/v146-let-bound-fixed-closure.yml']
+  workflow_dispatch:
+
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact admitted K2 K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Materialize frozen arms
+        run: |
+          cat > /tmp/V146Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V146P where Meta : Type
+          def V146P0 : V146P := ⟨Unit⟩
+          inductive V146Box (p : V146P) : Type where | mk : p.Meta → V146Box p
+          inductive V146Has {p : V146P} : V146Box p → Prop where | mk (x : p.Meta) : V146Has (V146Box.mk x)
+          EOF
+          cp /tmp/V146Common.lean /tmp/D.lean; cat >> /tmp/D.lean <<'EOF'
+          derive_mutual (fun (_ : Unit) => ∃ b : V146Box V146P0, V146Has b)
+          EOF
+          cp /tmp/V146Common.lean /tmp/G.lean; cat >> /tmp/G.lean <<'EOF'
+          derive_mutual (fun (p : V146P) => ∃ b : V146Box p, V146Has b)
+          EOF
+          cp /tmp/V146Common.lean /tmp/L.lean; cat >> /tmp/L.lean <<'EOF'
+          derive_mutual (let p : V146P := V146P0; fun (_ : Unit) => ∃ b : V146Box p, V146Has b)
+          EOF
+          cp /tmp/V146Common.lean /tmp/LS.lean; cat >> /tmp/LS.lean <<'EOF'
+          derive_mutual (let p : V146P := V146P0; fun (_ : Unit) => ∃ b : V146Box p, V146Has b)
+          #synth ArbitrarySizedSuchThat (V146Box V146P0) (fun b => V146Has b)
+          EOF
+          cp /tmp/V146Common.lean /tmp/LA.lean; cat >> /tmp/LA.lean <<'EOF'
+          abbrev V146Box0 := V146Box V146P0
+          derive_mutual (let p : V146P := V146P0; fun (_ : Unit) => ∃ b : V146Box p, V146Has b)
+          #synth ArbitrarySizedSuchThat V146Box0 (fun b => V146Has b)
+          EOF
+      - name: Execute arms
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          arms={'DIRECT_CONST':'D','GENERIC_VAR':'G','LET_BOUND_FIXED':'L','LET_BOUND_FIXED_SYNTH':'LS','LET_BOUND_ABBREV_SYNTH':'LA'}
+          out={}
+          for name,stem in arms.items():
+            p=subprocess.run(['lake','env','lean',f'/tmp/{stem}.lean'],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v146_{stem}.log').write_text(log); lo=log.lower()
+            if p.returncode==0: c='PASS'
+            elif 'expected to be a variable' in lo: c='NON_FVAR_APPLICABILITY'
+            elif 'failed to synthesize' in lo and 'meta' in lo: c='SYMBOLIC_INSTANCE'
+            elif 'unexpected token' in lo or 'parser' in lo or 'expected term' in lo: c='R10_APPARATUS'
+            else: c='OTHER_FAILURE'
+            out[name]={'rc':p.returncode,'class':c,'first_error':next((x for x in log.splitlines() if 'error' in x.lower()),'')}
+          pathlib.Path('v146_arms.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Protected suite
+        run: |
+          set +e; lake build > v146_build.log 2>&1; B=$?; lake test > v146_test.log 2>&1; T=$?; set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v146_protected.json
+          [ "$B" -eq 0 ] && [ "$T" -eq 0 ]
+      - name: Frozen verdict
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          a=json.load(open('v146_arms.json')); p=json.load(open('v146_protected.json')); c=lambda k:a[k]['class']
+          g={'C1_direct_control':c('DIRECT_CONST')=='NON_FVAR_APPLICABILITY','C2_generic_control':c('GENERIC_VAR')=='SYMBOLIC_INSTANCE','C3_let_derives':c('LET_BOUND_FIXED')=='PASS','C4_fixed_synth':c('LET_BOUND_FIXED_SYNTH')=='PASS','C5_abbrev_synth':c('LET_BOUND_ABBREV_SYNTH')=='PASS','C6_protected':p['build']==0 and p['test']==0}
+          if any(c(k)=='R10_APPARATUS' for k in a): v='R10_INCONCLUSIVE'
+          elif all(g.values()): v='REJECT_K6_LET_BOUND_OLD_CLOSURE_SUFFICES'
+          elif g['C1_direct_control'] and g['C2_generic_control'] and g['C6_protected']: v='K6_REMAINS_LICENSED_AFTER_LET_BOUND_SEPARATOR'
+          else: v='INCONCLUSIVE_CONTROL_FAILURE'
+          r={'canonical_id':'V146_LET_BOUND_FIXED_CLOSURE','arms':a,'gates':g,'protected':p,'verdict':v,'claim_boundary':'Old closure only; no K6 or constructor-development claim.'}
+          pathlib.Path('v146_result.json').write_text(json.dumps(r,indent=2)+'\n'); print(json.dumps(r,indent=2))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          for f in v146_?.log; do echo ==== $f ====; cat "$f"; done
+          cat v146_result.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v146-let-bound-fixed-closure
+          path: v146_*
