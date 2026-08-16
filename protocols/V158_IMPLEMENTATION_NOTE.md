@@ -1,0 +1,1 @@
+Implementation must be derived from existing V156/V157 transformation points. This note intentionally contains no outcome-dependent fixture edits. Any code change after this point must preserve the frozen V158 gates and may only repair apparatus or implement the preregistered scope-valid rule.
