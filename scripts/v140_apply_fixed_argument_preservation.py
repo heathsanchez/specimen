@@ -5,7 +5,7 @@ text = path.read_text()
 
 # Generic helper: ordinary arguments remain local declarations; a concrete
 # non-output argument becomes a let-bound fvar whose value is the original
-# elaborated expression.  This preserves definitional equality rather than
+# elaborated expression. This preserves definitional equality rather than
 # inventing an unconstrained variable.
 anchor = "open Lean Elab Command Meta Term Parser\nopen Idents Schedules ProofWidgets\n"
 helper = r'''
@@ -62,19 +62,22 @@ new_map = '''  let argNames ← constrArgs.mapIdxM
     (n, ty, preserve))
 '''
 count = text.count(old_map_a) + text.count(old_map_b)
-if count != 6:
-    raise SystemExit(f"V140 expected 6 arg-name anchors, found {count}")
+# The current pinned source has three structurally distinct derivation paths
+# containing this applicability guard. The first V140 runner incorrectly
+# expected six because earlier grep output duplicated snippet contexts.
+if count != 3:
+    raise SystemExit(f"V140 expected 3 arg-name anchors in pinned source, found {count}")
 text = text.replace(old_map_a, new_map).replace(old_map_b, new_map)
 
-# All six derivation paths build their temporary relation-argument context from
-# argNamesTypes.  Route the same body through the mixed decl helper instead.
+# Each of those derivation paths builds its temporary relation-argument context
+# from argNamesTypes. Route the same body through the mixed declaration helper.
 paren_old = 'withLocalDeclsDND argNamesTypes (fun _ => do'
 paren_new = 'withPreservedFixedArgumentDecls argDecls (do'
 bare_old = 'withLocalDeclsDND argNamesTypes fun _ => do'
 bare_new = 'withPreservedFixedArgumentDecls argDecls do'
 replaced = text.count(paren_old) + text.count(bare_old)
-if replaced < 6:
-    raise SystemExit(f"V140 expected at least 6 context anchors, found {replaced}")
+if replaced < 3:
+    raise SystemExit(f"V140 expected at least 3 context anchors in pinned source, found {replaced}")
 text = text.replace(paren_old, paren_new).replace(bare_old, bare_new)
 
 path.write_text(text)
