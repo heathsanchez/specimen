@@ -1,0 +1,164 @@
+name: V158 upstream PR47 external frontier
+
+on:
+  push:
+    branches: ["v158-upstream-pr47-external-frontier"]
+    paths:
+      - '.github/workflows/v158-upstream-pr47-external-frontier.yml'
+      - 'experiments/V158_UPSTREAM_PR47_EXTERNAL_FRONTIER_PREREG.md'
+  workflow_dispatch:
+
+jobs:
+  external-frontier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+
+      - name: Apply exact admitted K2 K5 only
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+
+      - name: Fetch and verify pinned upstream PR47 fixture
+        run: |
+          git remote add v158-upstream https://github.com/strata-org/specimen.git
+          git fetch --depth=1 v158-upstream da0e21613e9d18d44fe0f54e05ea003699a1adc0
+          git show FETCH_HEAD:SpecimenTest/DeriveArbitrarySuchThat/DeriveStructParamGenerator.lean > /tmp/V158_UPSTREAM.lean
+          UP_BLOB=$(git hash-object /tmp/V158_UPSTREAM.lean)
+          echo "upstream_blob=$UP_BLOB" | tee v158_source_identity.txt
+          test "$UP_BLOB" = "b20b11e33026d2a69a4d715f44f3b5e564d5fc75"
+
+      - name: Freeze adapted legacy and V156 arms
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          src=Path('/tmp/V158_UPSTREAM.lean').read_text()
+          start='#guard_msgs(drop info, drop warning) in\nderive_mutual\n'
+          runtime='/-! ## The derived producers actually run\n'
+          if start not in src or runtime not in src:
+            raise SystemExit('R10: upstream derive block markers missing')
+          prefix, rest = src.split(start,1)
+          _, tail = rest.split(runtime,1)
+          enum_marker='#guard_msgs(drop info) in\n#eval do\n  let results ← runSizedEnum\n'
+          if enum_marker not in tail:
+            raise SystemExit('R10: upstream enumerator runtime marker missing')
+          gen_tail, _ = tail.split(enum_marker,1)
+          # The retained upstream generator runtime already ends before the enumerator runtime.
+          # Close the namespace explicitly after removing only the enumerator runtime block.
+          target='(fun (P : ExprParams) (Γ : List Ty) (τ : Ty) => ∃ e : Tm P, @HasType P Γ e τ)'
+          legacy = prefix + 'derive_generator ' + target + '\n\n' + runtime + gen_tail + 'end StructParamSTLC\n'
+          intervention = prefix + 'derive_generator_with_requirements ' + target + '\n\n' + runtime + gen_tail + 'end StructParamSTLC\n'
+          Path('/tmp/V158_B0.lean').write_text(legacy)
+          Path('/tmp/V158_I0.lean').write_text(intervention)
+          Path('v158_adaptation.json').write_text(__import__('json').dumps({
+            'source_blob':'b20b11e33026d2a69a4d715f44f3b5e564d5fc75',
+            'target':target,
+            'changed_scope':'derive entrypoint only; enumerator path removed; generator runtime retained'
+          },indent=2)+'\n')
+          PY
+
+      - name: Run frozen external legacy baseline
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          p=subprocess.run(['lake','env','lean','/tmp/V158_B0.lean'],capture_output=True,text=True)
+          log=p.stdout+p.stderr; pathlib.Path('v158_B0.log').write_text(log); lo=log.lower()
+          if p.returncode==0:c='PASS'
+          elif 'failed to synthesize' in lo:c='SYNTH_FAILURE'
+          elif 'expected to be a variable' in lo:c='NON_FVAR_APPLICABILITY'
+          elif 'unable to derive producer schedule' in lo or 'cannot derive constrained producer' in lo:c='SCHEDULE_FAILURE'
+          else:c='OTHER_FAILURE'
+          pathlib.Path('v158_baseline.json').write_text(json.dumps({'rc':p.returncode,'class':c,'tail':log[-14000:]},indent=2)+'\n')
+          print(json.dumps({'rc':p.returncode,'class':c},indent=2))
+          PY
+
+      - name: Apply exact frozen V156 operator
+        run: |
+          python scripts/v156_apply_requirement_aware_deriver.py | tee v158_v156_apply.log
+          git diff -- Specimen/MakeConstrainedProducerInstance.lean Specimen/DeriveConstrainedProducer.lean > v158_v156_operator.patch
+          if grep -Eq 'StructParamSTLC|ExprParams|NodeInfo|HasType|P\.info\.Metadata|P\.VarId' v158_v156_operator.patch; then
+            echo external-fixture-token-leak
+            exit 158
+          fi
+          lake build Specimen.MakeConstrainedProducerInstance Specimen.DeriveConstrainedProducer
+
+      - name: Run frozen V156 external arm
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          p=subprocess.run(['lake','env','lean','/tmp/V158_I0.lean'],capture_output=True,text=True)
+          log=p.stdout+p.stderr; pathlib.Path('v158_I0.log').write_text(log); lo=log.lower()
+          if p.returncode==0:c='PASS'
+          elif 'requirement-aware deriver currently supports exactly one dependent requirement' in lo:c='V156_SINGLETON_CEILING'
+          elif 'requirement-aware deriver currently supports' in lo:c='V156_REQUIREMENT_ARITY_FAILURE'
+          elif 'failed to synthesize' in lo:c='SYNTH_FAILURE'
+          elif 'expected to be a variable' in lo:c='NON_FVAR_APPLICABILITY'
+          elif 'unable to derive producer schedule' in lo or 'cannot derive constrained producer' in lo:c='SCHEDULE_FAILURE'
+          else:c='OTHER_FAILURE'
+          pathlib.Path('v158_intervention.json').write_text(json.dumps({'rc':p.returncode,'class':c,'tail':log[-18000:]},indent=2)+'\n')
+          print(json.dumps({'rc':p.returncode,'class':c},indent=2))
+          PY
+
+      - name: Protected suite
+        continue-on-error: true
+        run: |
+          set +e
+          lake build > v158_build.log 2>&1; B=$?
+          lake test > v158_test.log 2>&1; T=$?
+          set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v158_protected.json
+          exit 0
+
+      - name: Frozen V158 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          def load(p): return json.loads(pathlib.Path(p).read_text()) if pathlib.Path(p).exists() else None
+          b=load('v158_baseline.json'); i=load('v158_intervention.json'); p=load('v158_protected.json')
+          ident=pathlib.Path('v158_source_identity.txt').read_text() if pathlib.Path('v158_source_identity.txt').exists() else ''
+          source_ok='b20b11e33026d2a69a4d715f44f3b5e564d5fc75' in ident
+          prot=p is not None and p.get('build')==0 and p.get('test')==0
+          if b is None or i is None or p is None or not source_ok:
+            v='R10_SOURCE_OR_APPARATUS_INCONCLUSIVE'
+          elif b['class']=='PASS':
+            v='REJECT_V158_BASELINE_ALREADY_SUFFICES'
+          elif i['class']=='PASS' and prot:
+            v='PASS_V158_V156_EXTERNAL_TRANSFER'
+          elif i['class'] in ('V156_SINGLETON_CEILING','V156_REQUIREMENT_ARITY_FAILURE') and prot:
+            v='PASS_V158_EXTERNAL_FRONTIER_EXPOSES_V156_SINGLETON_CEILING'
+          elif not prot:
+            v='R10_PROTECTED_FAILURE'
+          else:
+            v='NEGATIVE_V158_OTHER_EXTERNAL_RESIDUAL'
+          r={
+            'canonical_id':'V158_UPSTREAM_PR47_EXTERNAL_FRONTIER',
+            'source_blob':'b20b11e33026d2a69a4d715f44f3b5e564d5fc75',
+            'baseline':None if b is None else b['class'],
+            'intervention':None if i is None else i['class'],
+            'protected':p,
+            'verdict':v,
+            'claim_boundary':'Pinned externally authored frontier; V156 is a narrower special case of a broader operator family already present in upstream PR47.'
+          }
+          pathlib.Path('v158_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v158_result.json || true
+          cat v158_source_identity.txt || true
+          for f in v158_B0.log v158_I0.log v158_test.log; do [ -f "$f" ] && { echo ==== $f ====; tail -n 260 "$f"; }; done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v158-upstream-pr47-external-frontier
+          path: v158_*
