@@ -1,0 +1,181 @@
+name: V167 K7R recursive irrefutable pattern
+on:
+  push:
+    branches: ["v167-k7r-recursive-irrefutable-pattern"]
+    paths: ['.github/workflows/v167-k7r-recursive-irrefutable-pattern.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: default, test: false, lint: false}
+
+      - name: Freeze protocol fixtures and mechanisms
+        run: |
+          set -euo pipefail
+          sha256sum \
+            protocols/V167_K7R_RECURSIVE_IRREFUTABLE_PATTERN.md \
+            reports/V166_K7_PARTIAL_SCIENTIFIC_PASS_PROTECTED_FAILURE.md \
+            fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean \
+            fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean \
+            fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean \
+            scripts/v120_apply_binder_aware_fixed_parameter.py \
+            scripts/v132_apply_output_dependent_input_determined.py \
+            scripts/v156_apply_requirement_provenance_promotion.py \
+            scripts/v156b_apply_checker_consumer_compat.py \
+            scripts/v158_apply_scope_dependent_promotion.py \
+            scripts/v167_apply_recursive_irrefutable_pattern.py \
+            | tee v167_hashes.txt
+
+      - name: Define helpers
+        run: |
+          cat > /tmp/v167_helpers.sh <<'SH'
+          set -euo pipefail
+          apply_prior_stack() {
+            python scripts/v120_apply_binder_aware_fixed_parameter.py
+            python scripts/v132_apply_output_dependent_input_determined.py
+            python scripts/v156_apply_requirement_provenance_promotion.py
+            python scripts/v156b_apply_checker_consumer_compat.py
+            python scripts/v158_apply_scope_dependent_promotion.py
+          }
+          clean_source() {
+            git checkout HEAD -- Specimen SpecimenTest
+            rm -rf .lake/build
+          }
+          run_fixture() {
+            local fixture="$1" out="$2"
+            set +e
+            lake env lean "$fixture" > "$out.log" 2>&1
+            local rc=$?
+            set -e
+            echo "$rc" > "$out.rc"
+          }
+          SH
+
+      - name: Arm A prior stack only
+        run: |
+          set -euo pipefail
+          source /tmp/v167_helpers.sh
+          clean_source
+          apply_prior_stack | tee v167_A_apply.log
+          lake build Plausible Specimen > v167_A_build.log 2>&1
+          run_fixture fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean v167_A_natural
+          run_fixture fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean v167_A_heldout
+          run_fixture fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean v167_A_safety
+
+      - name: Arm B prior stack plus K7R
+        run: |
+          set -euo pipefail
+          source /tmp/v167_helpers.sh
+          clean_source
+          apply_prior_stack | tee v167_B_prior_apply.log
+          cp Specimen/MExp.lean /tmp/v167_pre_k7r_MExp.lean
+          python scripts/v167_apply_recursive_irrefutable_pattern.py | tee v167_B_k7r_apply.log
+          grep -q K7R_RECURSIVE_IRREFUTABLE_PATTERN_APPLIED v167_B_k7r_apply.log
+          diff -u /tmp/v167_pre_k7r_MExp.lean Specimen/MExp.lean > v167_B_k7r_only.diff || true
+          test -s v167_B_k7r_only.diff
+          if grep -E 'V165|V166|V167|ISSUE12|Issue12|Cedar|S\.mk|Packet|Choice|fixtures/' v167_B_k7r_only.diff; then
+            echo K7R_STATIC_AUDIT_TARGET_TOKEN_LEAK
+            exit 91
+          fi
+          set +e
+          lake build > v167_B_full_build.log 2>&1
+          echo "$?" > v167_B_full_build.rc
+          set -e
+          run_fixture fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean v167_B_natural
+          run_fixture fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean v167_B_heldout
+          run_fixture fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean v167_B_safety
+          set +e
+          lake test > v167_B_test.log 2>&1
+          echo "$?" > v167_B_test.rc
+          set -e
+
+      - name: Arm C independent K7R ablation
+        run: |
+          set -euo pipefail
+          source /tmp/v167_helpers.sh
+          clean_source
+          apply_prior_stack | tee v167_C_apply.log
+          lake build Plausible Specimen > v167_C_build.log 2>&1
+          run_fixture fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean v167_C_natural
+          run_fixture fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean v167_C_heldout
+          run_fixture fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean v167_C_safety
+
+      - name: Frozen V167 classification
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, pathlib
+
+          def arm(prefix):
+              rp=pathlib.Path(prefix+'.rc'); lp=pathlib.Path(prefix+'.log')
+              rc=int(rp.read_text().strip()) if rp.exists() else None
+              log=lp.read_text(errors='replace') if lp.exists() else ''
+              lo=log.lower()
+              return {'rc':rc,
+                      'redundant':('redundantmatchalt' in lo or 'redundant alternative' in lo),
+                      'apparatus':any(x in lo for x in ['unknown module prefix','object file']),
+                      'missing_instance':'failed to synthesize' in lo,
+                      'tail':log[-2200:]}
+
+          A_nat,A_hold,A_safe=[arm(x) for x in ['v167_A_natural','v167_A_heldout','v167_A_safety']]
+          B_nat,B_hold,B_safe=[arm(x) for x in ['v167_B_natural','v167_B_heldout','v167_B_safety']]
+          C_nat,C_hold,C_safe=[arm(x) for x in ['v167_C_natural','v167_C_heldout','v167_C_safety']]
+          def read_rc(path):
+              p=pathlib.Path(path)
+              return int(p.read_text().strip()) if p.exists() else None
+          bbuild=read_rc('v167_B_full_build.rc')
+          btest=read_rc('v167_B_test.rc')
+          required=['v167_A_build.log','v167_B_full_build.log','v167_B_test.log','v167_C_build.log','v167_B_k7r_apply.log','v167_B_k7r_only.diff']
+          apparatus=(not all(pathlib.Path(x).exists() for x in required) or
+                     any(x['apparatus'] for x in [A_nat,A_hold,A_safe,B_nat,B_hold,B_safe,C_nat,C_hold,C_safe]))
+          gates={
+              'A_natural_reproduces':A_nat['rc'] not in (None,0) and A_nat['redundant'],
+              'A_heldout_reproduces':A_hold['rc'] not in (None,0) and A_hold['redundant'],
+              'A_safety_passes':A_safe['rc']==0,
+              'B_natural_passes':B_nat['rc']==0,
+              'B_heldout_passes':B_hold['rc']==0,
+              'B_safety_passes':B_safe['rc']==0,
+              'B_full_build_passes':bbuild==0,
+              'B_full_test_passes':btest==0,
+              'C_natural_restores':C_nat['rc'] not in (None,0) and C_nat['redundant'],
+              'C_heldout_restores':C_hold['rc'] not in (None,0) and C_hold['redundant'],
+              'C_safety_passes':C_safe['rc']==0,
+              'K7R_applied':pathlib.Path('v167_B_k7r_apply.log').exists() and 'K7R_RECURSIVE_IRREFUTABLE_PATTERN_APPLIED' in pathlib.Path('v167_B_k7r_apply.log').read_text(errors='replace'),
+              'K7R_diff_present':pathlib.Path('v167_B_k7r_only.diff').exists() and pathlib.Path('v167_B_k7r_only.diff').stat().st_size>0,
+          }
+          if apparatus:
+              verdict='R10_V167_INCONCLUSIVE'
+          elif all(gates.values()):
+              verdict='PASS_V167_K7R_ADMITTED_BOUNDED_NATURAL_CONSTRUCTOR_DEVELOPMENT'
+          else:
+              verdict='FAIL_V167_K7R_NOT_ADMITTED'
+          out={'canonical_id':'V167_K7R_RECURSIVE_IRREFUTABLE_PATTERN','apparatus':apparatus,'B_full_build_rc':bbuild,'B_test_rc':btest,'gates':gates,
+               'arms':{'A':{'natural':A_nat,'heldout':A_hold,'safety':A_safe},'B':{'natural':B_nat,'heldout':B_hold,'safety':B_safe},'C':{'natural':C_nat,'heldout':C_hold,'safety':C_safe}},'verdict':verdict}
+          pathlib.Path('v167_result.json').write_text(json.dumps(out,indent=2)+'\n')
+          print(json.dumps(out,indent=2))
+          if verdict!='PASS_V167_K7R_ADMITTED_BOUNDED_NATURAL_CONSTRUCTOR_DEVELOPMENT': raise SystemExit(1)
+          PY
+
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v167_result.json || true
+          echo '=== K7R-only diff ==='
+          cat v167_B_k7r_only.diff || true
+          echo '=== B full test tail ==='
+          tail -160 v167_B_test.log 2>/dev/null || true
+          echo '=== fixture tails ==='
+          for f in v167_*_natural.log v167_*_heldout.log v167_*_safety.log; do echo "--- $f"; tail -70 "$f" 2>/dev/null || true; done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v167-k7r-recursive-irrefutable-pattern
+          path: 'v167*'
+          retention-days: 90
