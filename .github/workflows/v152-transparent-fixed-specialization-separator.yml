@@ -1,0 +1,80 @@
+name: V152 transparent fixed specialization separator
+
+on:
+  push:
+    branches: ["v152-transparent-fixed-specialization-separator"]
+    paths:
+      - '.github/workflows/v152-transparent-fixed-specialization-separator.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: default, test: false, lint: false}
+      - name: Freeze and run V152
+        run: |
+          sha256sum protocols/V152_TRANSPARENT_FIXED_SPECIALIZATION_SEPARATOR_PRECOMMIT.md
+          cat > /tmp/V152_OPAQUE.lean <<'EOF'
+          import Plausible.Arbitrary
+          structure V152OP where Meta : Type
+          def V152OP0 : V152OP := ⟨Unit⟩
+          structure V152OQ where Carrier : Type
+          def V152OQ0 : V152OQ := ⟨Bool⟩
+          #synth Plausible.Arbitrary V152OP0.Meta
+          #synth Plausible.Arbitrary V152OQ0.Carrier
+          EOF
+          cat > /tmp/V152_TRANSPARENT.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          structure V152P where Meta : Type
+          abbrev V152P0 : V152P := ⟨Unit⟩
+          inductive V152Box (p : V152P) : Type where | mk : p.Meta → V152Box p
+          inductive V152Has {p : V152P} : V152Box p → Prop where | mk (x : p.Meta) : V152Has (V152Box.mk x)
+          #synth Plausible.Arbitrary V152P0.Meta
+          instance {p : V152P} [Plausible.Arbitrary p.Meta] : ArbitrarySizedSuchThat (V152Box p) (fun b => V152Has b) where
+            arbitrarySizedST := fun _ => do
+              let x : p.Meta ← Plausible.Arbitrary.arbitrary
+              return V152Box.mk x
+          #synth ArbitrarySizedSuchThat (V152Box V152P0) (fun b => V152Has b)
+
+          structure V152Q where Carrier : Type
+          abbrev V152Q0 : V152Q := ⟨Bool⟩
+          inductive V152Packet (q : V152Q) : Type where | pack : q.Carrier → V152Packet q
+          inductive V152Accepts {q : V152Q} : V152Packet q → Prop where | accept (x : q.Carrier) : V152Accepts (V152Packet.pack x)
+          #synth Plausible.Arbitrary V152Q0.Carrier
+          instance {q : V152Q} [Plausible.Arbitrary q.Carrier] : ArbitrarySizedSuchThat (V152Packet q) (fun p => V152Accepts p) where
+            arbitrarySizedST := fun _ => do
+              let x : q.Carrier ← Plausible.Arbitrary.arbitrary
+              return V152Packet.pack x
+          #synth ArbitrarySizedSuchThat (V152Packet V152Q0) (fun p => V152Accepts p)
+          EOF
+          sha256sum /tmp/V152_*.lean | tee v152_fixture_hashes.txt
+          set +e
+          lake env lean /tmp/V152_OPAQUE.lean > v152_opaque.log 2>&1; O=$?
+          lake env lean /tmp/V152_TRANSPARENT.lean > v152_transparent.log 2>&1; T=$?
+          set -e
+          echo "$O" > v152_opaque_rc.txt; echo "$T" > v152_transparent_rc.txt
+          python - <<'PY'
+          import json,pathlib
+          O=int(pathlib.Path('v152_opaque_rc.txt').read_text()); T=int(pathlib.Path('v152_transparent_rc.txt').read_text())
+          ol=pathlib.Path('v152_opaque.log').read_text(); tl=pathlib.Path('v152_transparent.log').read_text()
+          gates={'G1_opaque_control_fails':O!=0 and 'failed to synthesize' in ol.lower(),'G2_transparent_A_B_pass':T==0}
+          v='PASS_V152_TRANSPARENT_SPECIALIZATION_CONFIRMED' if all(gates.values()) else 'NEGATIVE_V152_TRANSPARENT_SPECIALIZATION_NOT_CONFIRMED'
+          r={'canonical_id':'V152_TRANSPARENT_FIXED_SPECIALIZATION_SEPARATOR','opaque_rc':O,'transparent_rc':T,'gates':gates,'verdict':v,'opaque_log':ol[-6000:],'transparent_log':tl[-6000:],'claim_boundary':'Separator only; K6 not earned.'}
+          pathlib.Path('v152_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - name: Protected baseline sanity
+        run: |
+          lake build
+          lake test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v152-transparent-specialization
+          path: v152_*
+          if-no-files-found: warn
