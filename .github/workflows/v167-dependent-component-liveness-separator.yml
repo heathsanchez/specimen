@@ -1,0 +1,116 @@
+name: V167 dependent component liveness separator
+
+on:
+  push:
+    branches: ["v167-dependent-component-liveness-separator"]
+    paths:
+      - '.github/workflows/v167-dependent-component-liveness-separator.yml'
+      - 'experiments/V167_DEPENDENT_COMPONENT_LIVENESS_SEPARATOR_PREREG.md'
+  workflow_dispatch:
+
+jobs:
+  liveness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact admitted K2 K5 only
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.Utils Specimen.DeriveConstrainedProducer
+      - name: Freeze liveness probe
+        run: |
+          cat > /tmp/V167.lean <<'EOF'
+          import Specimen.DeriveConstrainedProducer
+          import Specimen.Utils
+          open Lean Meta Elab Command Term
+
+          inductive V167Plain (α : Type) : Option α → Prop where
+            | none : V167Plain α none
+
+          structure V167P where
+            A : Type
+          inductive V167Struct (p : V167P) : Option p.A → Prop where
+            | none : V167Struct p none
+
+          private def classifyRaw (n : Name) : TermElabM String := do
+            let info ← getConstInfo n
+            let cs ← getComponentsOfArrowType info.type
+            if h : 1 < cs.size then
+              try
+                let _ ← inferType cs[1]
+                pure "LIVE"
+              catch _ => pure "STALE"
+            else pure "MISSING"
+
+          private def classifySequential (n : Name) : TermElabM String := do
+            let info ← getConstInfo n
+            forallTelescope info.type fun fvars _ => do
+              let tys ← getCorrectTypes fvars n info.levelParams.map Level.param
+              if h : 1 < tys.size then
+                try
+                  let _ ← inferType tys[1]
+                  pure "LIVE"
+                catch _ => pure "STALE"
+              else pure "MISSING"
+
+          elab "v167_probe" : command => do
+            let pRaw ← liftTermElabM <| classifyRaw ``V167Plain
+            let sRaw ← liftTermElabM <| classifyRaw ``V167Struct
+            let pSeq ← liftTermElabM <| classifySequential ``V167Plain
+            let sSeq ← liftTermElabM <| classifySequential ``V167Struct
+            logInfo m!"V167_PLAIN_RAW={pRaw}"
+            logInfo m!"V167_STRUCT_RAW={sRaw}"
+            logInfo m!"V167_PLAIN_SEQ={pSeq}"
+            logInfo m!"V167_STRUCT_SEQ={sSeq}"
+
+          v167_probe
+          EOF
+      - name: Execute frozen liveness probe
+        continue-on-error: true
+        run: |
+          set +e
+          lake env lean /tmp/V167.lean > v167_probe.log 2>&1
+          RC=$?
+          set -e
+          echo $RC > v167_probe_rc.txt
+          cat v167_probe.log
+          exit 0
+      - name: Protected suite
+        continue-on-error: true
+        run: |
+          set +e; lake build > v167_build.log 2>&1; B=$?; lake test > v167_test.log 2>&1; T=$?; set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v167_protected.json
+          exit 0
+      - name: Frozen V167 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib,re
+          log=pathlib.Path('v167_probe.log').read_text() if pathlib.Path('v167_probe.log').exists() else ''
+          rc=int(pathlib.Path('v167_probe_rc.txt').read_text()) if pathlib.Path('v167_probe_rc.txt').exists() else 999
+          p=json.loads(pathlib.Path('v167_protected.json').read_text()) if pathlib.Path('v167_protected.json').exists() else None
+          vals={k:(re.search(k+r'=(LIVE|STALE|MISSING)',log).group(1) if re.search(k+r'=(LIVE|STALE|MISSING)',log) else None) for k in ['V167_PLAIN_RAW','V167_STRUCT_RAW','V167_PLAIN_SEQ','V167_STRUCT_SEQ']}
+          if rc!=0 or p is None or any(v is None for v in vals.values()): v='R10_PROBE_OR_SETUP_FAILURE'
+          elif p.get('build')!=0 or p.get('test')!=0: v='R10_PROTECTED_FAILURE'
+          elif vals=={'V167_PLAIN_RAW':'STALE','V167_STRUCT_RAW':'STALE','V167_PLAIN_SEQ':'LIVE','V167_STRUCT_SEQ':'LIVE'}: v='PASS_V167_RAW_COMPONENTS_STALE_BUT_SEQUENTIAL_LIVE'
+          elif vals['V167_PLAIN_RAW']=='LIVE' and vals['V167_STRUCT_RAW']=='STALE' and vals['V167_PLAIN_SEQ']=='LIVE' and vals['V167_STRUCT_SEQ']=='LIVE': v='PASS_V167_STRUCTURE_ONLY_RAW_STALE'
+          else: v='V167_RAW_COMPONENTS_NOT_SOURCE'
+          r={'canonical_id':'V167_DEPENDENT_COMPONENT_LIVENESS_SEPARATOR','probe_rc':rc,'values':vals,'protected':p,'verdict':v,'claim_boundary':'Mechanism localization only; no production repair.'}
+          pathlib.Path('v167_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v167_result.json || true
+          cat v167_probe.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v167-dependent-component-liveness-separator
+          path: v167_*
