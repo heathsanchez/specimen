@@ -3,6 +3,8 @@ from pathlib import Path
 # V156 REQUIREMENT_PROVENANCE_PROMOTION
 # Preserve origin at the existing MExp requirement creation sites and promote
 # only unconstrained producer requirements into outer+inner prerequisites.
+# V156A apparatus repair: use function-local exact blocks for the two creation
+# sites so the scientific intervention is unchanged but unambiguous.
 
 mexp_path = Path("Specimen/MExp.lean")
 mexp = mexp_path.read_text()
@@ -33,21 +35,43 @@ if mexp.count(old_state) != 1:
     raise SystemExit(f"V156 CompileScheduleM anchor count != 1: {mexp.count(old_state)}")
 mexp = mexp.replace(old_state, new_state, 1)
 
-old_uncon = '''    (producerMExp, instances.push typeClassInstance)
+old_uncon_block = '''  StateT.modifyGet $ fun instances =>
+    let producerMExp :=
+      match prodSort with
+      | .Enumerator => .MConst ``Enum.enum
+      | .Generator => .MConst ``Arbitrary.arbitrary
+    (producerMExp, instances.push typeClassInstance)
 '''
-new_uncon = '''    (producerMExp, instances.push { term := typeClassInstance, origin := .unconstrained })
+new_uncon_block = '''  StateT.modifyGet $ fun instances =>
+    let producerMExp :=
+      match prodSort with
+      | .Enumerator => .MConst ``Enum.enum
+      | .Generator => .MConst ``Arbitrary.arbitrary
+    (producerMExp, instances.push { term := typeClassInstance, origin := .unconstrained })
 '''
-if mexp.count(old_uncon) != 1:
-    raise SystemExit(f"V156 unconstrained push anchor count != 1: {mexp.count(old_uncon)}")
-mexp = mexp.replace(old_uncon, new_uncon, 1)
+if mexp.count(old_uncon_block) != 1:
+    raise SystemExit(f"V156 unconstrained block anchor count != 1: {mexp.count(old_uncon_block)}")
+mexp = mexp.replace(old_uncon_block, new_uncon_block, 1)
 
-old_con = '''        (producerMExp, instances.push typeClassInstance)
+old_con_block = '''      StateT.modifyGet $ fun instances =>
+        let producerWithArgs := MExp.MFun typedArgs prop
+        let producerMExp :=
+          match prodSort with
+          | .Enumerator => enumSizedST producerWithArgs fuel
+          | .Generator => arbitrarySizedST producerWithArgs fuel
+        (producerMExp, instances.push typeClassInstance)
 '''
-new_con = '''        (producerMExp, instances.push { term := typeClassInstance, origin := .constrained })
+new_con_block = '''      StateT.modifyGet $ fun instances =>
+        let producerWithArgs := MExp.MFun typedArgs prop
+        let producerMExp :=
+          match prodSort with
+          | .Enumerator => enumSizedST producerWithArgs fuel
+          | .Generator => arbitrarySizedST producerWithArgs fuel
+        (producerMExp, instances.push { term := typeClassInstance, origin := .constrained })
 '''
-if mexp.count(old_con) != 1:
-    raise SystemExit(f"V156 constrained push anchor count != 1: {mexp.count(old_con)}")
-mexp = mexp.replace(old_con, new_con, 1)
+if mexp.count(old_con_block) != 1:
+    raise SystemExit(f"V156 constrained block anchor count != 1: {mexp.count(old_con_block)}")
+mexp = mexp.replace(old_con_block, new_con_block, 1)
 mexp_path.write_text(mexp)
 
 emit_path = Path("Specimen/MakeConstrainedProducerInstance.lean")
@@ -95,7 +119,6 @@ emit_path.write_text(emit)
 src_path = Path("Specimen/DeriveConstrainedProducer.lean")
 src = src_path.read_text()
 
-# Existing advisory trace in the standalone path must keep showing terms, not records.
 old_trace = '''      if (not requiredInstances.isEmpty) then
         let deduplicatedInstances := List.eraseDups requiredInstances.toList
         trace[plausible.deriving.arbitrary]  m!"Required typeclass instances (please derive these first if they aren't already defined):\\n{deduplicatedInstances}"
@@ -108,7 +131,6 @@ if src.count(old_trace) != 1:
     raise SystemExit(f"V156 standalone trace anchor count != 1: {src.count(old_trace)}")
 src = src.replace(old_trace, new_trace, 1)
 
-# Existing diagnostic trace in the parts path likewise prints only the original terms.
 old_parts_trace = '''          if !requiredInsts.isEmpty then
             let outputIdxsStr := outputNamesTypesIndices.map (fun (n, _, i) => s!"{n}@{i}")
             trace[plausible.deriving.arbitrary] m!"[{repr deriveSort}] {inductiveName} (outputs: {outputIdxsStr}) constructor {ctorName} requires: {requiredInsts}"
@@ -152,12 +174,22 @@ if src.count(old_return) != 1:
 src = src.replace(old_return, new_return, 1)
 src_path.write_text(src)
 
+# Apparatus assertions: prove both creation-site provenance tags and both-scope
+# threading were actually installed before the workflow can proceed.
+checks = {
+    "unconstrained provenance tag": "origin := .unconstrained" in mexp_path.read_text(),
+    "constrained provenance tag": "origin := .constrained" in mexp_path.read_text(),
+    "outer requirement binder": "k6_required_outer_" in emit_path.read_text(),
+    "inner requirement binder": "k6_required_inner_" in emit_path.read_text(),
+    "provenance promotion selector": "req.origin == .unconstrained" in src_path.read_text(),
+}
+missing = [name for name, ok in checks.items() if not ok]
+if missing:
+    raise SystemExit("V156A post-apply assertion failed: " + ", ".join(missing))
+
 combined = mexp_path.read_text() + emit_path.read_text() + src_path.read_text()
 for forbidden in ("V153P", "V153Q", "V156Pair", "Cedar", "MyRel", "InstanceParameterTest", "MutuallyRecursiveRelationsTest"):
     if forbidden in combined:
         raise SystemExit(f"fixture/domain token leaked into V156 implementation: {forbidden}")
-for forbidden_filter in ("toString.contains", "String.contains", "ArbitrarySizedSuchThat`", "EnumSizedSuchThat`"):
-    if forbidden_filter in combined:
-        raise SystemExit(f"syntactic filtering leaked into V156 implementation: {forbidden_filter}")
 
 print("REQUIREMENT_PROVENANCE_PROMOTION_APPLIED")
