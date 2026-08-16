@@ -1,0 +1,109 @@
+name: V152 dependent projection normalization separator
+
+on:
+  push:
+    branches: ["v152-dependent-projection-normalization-separator"]
+    paths:
+      - '.github/workflows/v152-dependent-projection-normalization-separator.yml'
+      - 'experiments/V152_DEPENDENT_PROJECTION_NORMALIZATION_SEPARATOR_PREREG.md'
+  workflow_dispatch:
+
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact admitted K2 K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Freeze V152 fixtures
+        run: |
+          cat > /tmp/V152Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          structure V152P where Meta : Type
+          abbrev V152PA : V152P := ⟨Unit⟩
+          def V152PD : V152P := ⟨Unit⟩
+          inductive V152Box (p : V152P) : Type where | mk : p.Meta → V152Box p
+          inductive V152Has {p : V152P} : V152Box p → Prop where | mk (x : p.Meta) : V152Has (V152Box.mk x)
+          EOF
+          cp /tmp/V152Common.lean /tmp/V152A.lean
+          echo '#synth Plausible.Arbitrary Unit' >> /tmp/V152A.lean
+          cp /tmp/V152Common.lean /tmp/V152B.lean
+          echo '#synth Plausible.Arbitrary (V152P.mk Unit).Meta' >> /tmp/V152B.lean
+          cp /tmp/V152Common.lean /tmp/V152C.lean
+          echo '#synth Plausible.Arbitrary V152PA.Meta' >> /tmp/V152C.lean
+          cp /tmp/V152Common.lean /tmp/V152D.lean
+          echo '#synth Plausible.Arbitrary V152PD.Meta' >> /tmp/V152D.lean
+          cp /tmp/V152Common.lean /tmp/V152E.lean
+          cat >> /tmp/V152E.lean <<'EOF'
+          instance : Plausible.Arbitrary V152PD.Meta := by
+            change Plausible.Arbitrary Unit
+            infer_instance
+          #synth Plausible.Arbitrary V152PD.Meta
+          EOF
+          cp /tmp/V152Common.lean /tmp/V152F.lean
+          cat >> /tmp/V152F.lean <<'EOF'
+          instance : Plausible.Arbitrary V152PD.Meta := by
+            change Plausible.Arbitrary Unit
+            infer_instance
+          instance (p : V152P) [Plausible.Arbitrary p.Meta] : ArbitrarySizedSuchThat (V152Box p) (fun b => V152Has b) where
+            arbitrarySizedST := fun _ => do
+              let x : p.Meta ← Plausible.Arbitrary.arbitrary
+              pure (V152Box.mk x)
+          #synth ArbitrarySizedSuchThat (V152Box V152PD) (fun b => V152Has b)
+          EOF
+          cp /tmp/V152Common.lean /tmp/V152G.lean
+          cat >> /tmp/V152G.lean <<'EOF'
+          instance : ArbitrarySizedSuchThat (V152Box V152PD) (fun b => V152Has b) where
+            arbitrarySizedST := fun _ => do
+              let x : Unit ← Plausible.Arbitrary.arbitrary
+              pure (V152Box.mk x)
+          #synth ArbitrarySizedSuchThat (V152Box V152PD) (fun b => V152Has b)
+          EOF
+      - name: Run frozen arms A-G
+        run: |
+          python - <<'PY'
+          import json,subprocess,pathlib
+          out={}
+          for n in 'ABCDEFG':
+            p=subprocess.run(['lake','env','lean',f'/tmp/V152{n}.lean'],capture_output=True,text=True)
+            log=p.stdout+p.stderr; pathlib.Path(f'v152_{n}.log').write_text(log)
+            out[n]={'rc':p.returncode,'pass':p.returncode==0,'tail':log[-5000:]}
+          pathlib.Path('v152_arms.json').write_text(json.dumps(out,indent=2)+'\n')
+          print(json.dumps(out,indent=2))
+          PY
+      - name: Frozen V152 verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          p=pathlib.Path('v152_arms.json')
+          if not p.exists(): r={'canonical_id':'V152_DEPENDENT_PROJECTION_NORMALIZATION_SEPARATOR','verdict':'R10_INCONCLUSIVE'}
+          else:
+            a=json.loads(p.read_text()); P={k:v['pass'] for k,v in a.items()}
+            if not P['A']: v='R10_REFERENCE_ARBITRARY_UNIT_FAILED'
+            elif not P['B']: v='V152_PROJECTION_REDUCTION_BLOCKED'
+            elif P['B'] and not P['D'] and P['E'] and P['F'] and P['G']:
+              v='PASS_V152_NAMED_DEF_TRANSPARENCY_SEPARATOR_WITH_BRIDGE'
+            else: v='V152_MIXED_SEPARATOR_RESULT'
+            r={'canonical_id':'V152_DEPENDENT_PROJECTION_NORMALIZATION_SEPARATOR','arms':P,'verdict':v,'claim_boundary':'Representation mechanism only; no K6 admission.'}
+          pathlib.Path('v152_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v152_result.json || true
+          for f in v152_?.log; do echo ==== $f ====; cat "$f"; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v152-dependent-projection-normalization-separator
+          path: v152_*
