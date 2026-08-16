@@ -1,0 +1,54 @@
+name: V151B fixed capability synthesis separator
+
+on:
+  push:
+    branches: ["v151b-fixed-capability-synthesis-separator"]
+    paths:
+      - '.github/workflows/v151b-fixed-capability-synthesis-separator.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: default, test: false, lint: false}
+      - name: Freeze and run V151B
+        run: |
+          sha256sum protocols/V151B_FIXED_CAPABILITY_SYNTHESIS_SEPARATOR_PRECOMMIT.md
+          cat > /tmp/V151B.lean <<'EOF'
+          import Plausible.Arbitrary
+          structure V151BP where Meta : Type
+          def V151BP0 : V151BP := ⟨Unit⟩
+          structure V151BQ where Carrier : Type
+          def V151BQ0 : V151BQ := ⟨Bool⟩
+          #synth Plausible.Arbitrary Unit
+          #synth Plausible.Arbitrary Bool
+          #synth Plausible.Arbitrary V151BP0.Meta
+          #synth Plausible.Arbitrary V151BQ0.Carrier
+          class V151BWitnessedP (p : V151BP) : Prop where ok : True
+          instance {p : V151BP} [Plausible.Arbitrary p.Meta] : V151BWitnessedP p := ⟨True.intro⟩
+          #synth V151BWitnessedP V151BP0
+          class V151BWitnessedQ (q : V151BQ) : Prop where ok : True
+          instance {q : V151BQ} [Plausible.Arbitrary q.Carrier] : V151BWitnessedQ q := ⟨True.intro⟩
+          #synth V151BWitnessedQ V151BQ0
+          EOF
+          sha256sum /tmp/V151B.lean | tee v151b_fixture_hash.txt
+          set +e
+          lake env lean /tmp/V151B.lean > v151b.log 2>&1
+          RC=$?
+          set -e
+          python - <<'PY'
+          import json,pathlib
+          log=pathlib.Path('v151b.log').read_text(); rc=int('${RC}')
+          r={'canonical_id':'V151B_FIXED_CAPABILITY_SYNTHESIS_SEPARATOR','rc':rc,'verdict':'PASS_V151B_FIXED_CAPABILITY_AND_MINIMAL_DEPENDENT_SYNTHESIS' if rc==0 else 'NEGATIVE_V151B_SYNTHESIS_RESIDUAL','log':log[-12000:],'claim_boundary':'Diagnostic only; no K6 earned.'}
+          pathlib.Path('v151b_result.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n'); print(json.dumps(r,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v151b-fixed-capability-synthesis
+          path: v151b_*
