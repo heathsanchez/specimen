@@ -1,7 +1,7 @@
-name: V171 typeparam constraint deletion separator
+name: V171A typeparam constraint deletion apparatus repair
 on:
   push:
-    branches: ["v171-typeparam-constraint-deletion-separator"]
+    branches: ["v171a-typeparam-constraint-deletion-apparatus-repair"]
     paths: ['.github/workflows/v171-typeparam-constraint-deletion-separator.yml']
   workflow_dispatch:
 permissions: {contents: read}
@@ -46,12 +46,12 @@ jobs:
           probe fixtures/V170_ISSUE19_PARAMETER_OVERCONSTRAINT.lean v171_A_natural
           probe fixtures/V171_GENERATED_TYPE_SAFETY.lean v171_A_generated
           probe fixtures/V171_EQUALITY_TYPEPARAM_SAFETY.lean v171_A_equality
-      - name: Arm B blind deletion
+      - name: Arm B blind deletion all emitters
         run: |
           source /tmp/v171.sh
           clean; prior > v171_B_prior.log 2>&1
           python scripts/v171_apply_delete_default_typeparam_constraints.py | tee v171_B_delete.log
-          grep -q V171_DEFAULT_TYPEPARAM_CONSTRAINTS_DELETED v171_B_delete.log
+          grep -q V171_DEFAULT_TYPEPARAM_CONSTRAINTS_DELETED_ALL_EMITTERS v171_B_delete.log
           build > v171_B_build.log 2>&1
           probe fixtures/V170_ISSUE19_PARAMETER_OVERCONSTRAINT.lean v171_B_natural
           probe fixtures/V171_GENERATED_TYPE_SAFETY.lean v171_B_generated
@@ -79,11 +79,11 @@ jobs:
           gates={'A_natural_fails':A['natural']['rc'] not in (None,0),'A_generated_passes':A['generated']['rc']==0,'A_equality_passes':A['equality']['rc']==0,
                  'B_natural_rescued':B['natural']['rc']==0,'B_generated_passes':B['generated']['rc']==0,'B_equality_passes':B['equality']['rc']==0,
                  'C_natural_restores':C['natural']['rc'] not in (None,0)}
-          if apparatus: verdict='R10_V171_INCONCLUSIVE'
+          if apparatus: verdict='R10_V171A_INCONCLUSIVE'
           elif gates['B_natural_rescued'] and gates['B_generated_passes'] and gates['B_equality_passes'] and all(gates.values()): verdict='PASS_V171_DELETION_SUFFICIENT'
           elif gates['B_natural_rescued'] and (not gates['B_generated_passes'] or not gates['B_equality_passes']): verdict='SEPARATOR_V171_BLIND_DELETION_RESCUES_NATURAL_BUT_BREAKS_REQUIRED_CAPABILITY'
           else: verdict='NEGATIVE_V171_DELETION_NOT_SUFFICIENT'
-          out={'canonical_id':'V171_TYPEPARAM_CONSTRAINT_DELETION_SEPARATOR','apparatus':apparatus,'gates':gates,'A':A,'B':B,'C':C,'verdict':verdict}
+          out={'canonical_id':'V171A_TYPEPARAM_CONSTRAINT_DELETION_APPARATUS_REPAIR','apparatus':apparatus,'gates':gates,'A':A,'B':B,'C':C,'verdict':verdict}
           pathlib.Path('v171_result.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
           PY
       - name: Diagnostics
@@ -93,4 +93,4 @@ jobs:
           for f in v171_*_natural.log v171_*_generated.log v171_*_equality.log; do echo ===$f===; tail -80 "$f" 2>/dev/null || true; done
       - uses: actions/upload-artifact@v4
         if: always()
-        with: {name: v171-typeparam-constraint-deletion-separator, path: 'v171*', retention-days: 90}
+        with: {name: v171a-typeparam-constraint-deletion-apparatus-repair, path: 'v171*', retention-days: 90}
