@@ -1,0 +1,133 @@
+name: V142 instance-scoped old-closure separator
+
+on:
+  push:
+    branches: ["v142-instance-scoped-old-closure"]
+  workflow_dispatch:
+
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+
+      - name: Apply exact admitted K2 K5 unchanged
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          git diff -- Specimen/DeriveConstrainedProducer.lean | tee v142_admitted.patch
+          if grep -Eq 'V142|V140|V139|P0|Box|Has' v142_admitted.patch; then
+            echo INVALID_TARGET_SPECIFIC_MUTATION
+            exit 142
+          fi
+          lake build Specimen.DeriveConstrainedProducer
+
+      - name: Materialize all frozen arms
+        run: |
+          cat > /tmp/V142Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+
+          structure V142P where
+            Meta : Type
+
+          def V142P0 : V142P := ⟨Unit⟩
+
+          inductive V142Box (p : V142P) : Type where
+          | mk : p.Meta → V142Box p
+
+          inductive V142Has {p : V142P} : V142Box p → Prop where
+          | mk (x : p.Meta) : V142Has (V142Box.mk x)
+          EOF
+
+          cp /tmp/V142Common.lean /tmp/V142T0.lean
+          cat >> /tmp/V142T0.lean <<'EOF'
+          derive_mutual (fun (_ : Unit) => ∃ b : V142Box V142P0, V142Has b)
+          EOF
+
+          cp /tmp/V142Common.lean /tmp/V142T1.lean
+          cat >> /tmp/V142T1.lean <<'EOF'
+          derive_mutual (fun (p : V142P) (_ : Unit) => ∃ b : V142Box p, V142Has b)
+          EOF
+
+          cp /tmp/V142Common.lean /tmp/V142T2.lean
+          cat >> /tmp/V142T2.lean <<'EOF'
+          derive_mutual (fun (p : V142P) [inst : Plausible.Arbitrary p.Meta] (_ : Unit) => ∃ b : V142Box p, V142Has b)
+          EOF
+
+          cp /tmp/V142Common.lean /tmp/V142T3.lean
+          cat >> /tmp/V142T3.lean <<'EOF'
+          derive_mutual (fun (p : V142P) [inst : Plausible.Arbitrary p.Meta] (_ : Unit) => ∃ b : V142Box p, V142Has b)
+          #synth ArbitrarySizedSuchThat (V142Box V142P0) (fun b => V142Has b)
+          EOF
+
+      - name: Run and classify frozen arms
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          arms={'T0_DIRECT':'/tmp/V142T0.lean','T1_PARAM_NO_INSTANCE':'/tmp/V142T1.lean','T2_PARAM_INSTANCE_BINDER':'/tmp/V142T2.lean','T3_FIXED_SPECIALIZATION':'/tmp/V142T3.lean'}
+          out={}
+          for name,path in arms.items():
+              p=subprocess.run(['lake','env','lean',path],capture_output=True,text=True)
+              log=p.stdout+p.stderr
+              pathlib.Path(f'v142_{name.lower()}.log').write_text(log)
+              low=log.lower()
+              if p.returncode==0: cls='PASS'
+              elif 'expected to be a variable' in low: cls='NON_FVAR_APPLICABILITY'
+              elif ('failed to synthesize' in low and 'arbitrary' in low and 'meta' in low): cls='SYMBOLIC_INSTANCE'
+              elif 'unexpected token' in low or 'parser' in low or 'expected' in low and '[inst' in low: cls='R10_PARSER'
+              else: cls='OTHER_FAILURE'
+              out[name]={'rc':p.returncode,'class':cls,'first_error':next((x for x in log.splitlines() if 'error' in x.lower()),'')}
+          pathlib.Path('v142_arms.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+
+      - name: Protected suite
+        run: |
+          set +e
+          lake build > v142_build.log 2>&1; B=$?
+          lake test > v142_test.log 2>&1; T=$?
+          set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v142_protected.json
+          cat v142_build.log
+          cat v142_test.log
+          if [ "$B" -ne 0 ] || [ "$T" -ne 0 ]; then exit 143; fi
+
+      - name: Frozen verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          arms=json.loads(pathlib.Path('v142_arms.json').read_text()) if pathlib.Path('v142_arms.json').exists() else {}
+          prot=json.loads(pathlib.Path('v142_protected.json').read_text()) if pathlib.Path('v142_protected.json').exists() else None
+          c=lambda k:arms.get(k,{}).get('class')
+          gates={'S1_exact_k2_k5_build':bool(arms),'S2_direct_non_fvar':c('T0_DIRECT')=='NON_FVAR_APPLICABILITY','S3_param_symbolic':c('T1_PARAM_NO_INSTANCE')=='SYMBOLIC_INSTANCE','S4_instance_binder_pass':c('T2_PARAM_INSTANCE_BINDER')=='PASS','S5_specialization_pass':c('T3_FIXED_SPECIALIZATION')=='PASS','S6_protected_green':prot is not None and prot.get('build')==0 and prot.get('test')==0}
+          if any(c(k)=='R10_PARSER' for k in ['T2_PARAM_INSTANCE_BINDER','T3_FIXED_SPECIALIZATION']): verdict='R10_INCONCLUSIVE'
+          elif all(gates.values()): verdict='REJECT_K6_OLD_CLOSURE_SUFFICES'
+          elif gates['S1_exact_k2_k5_build'] and gates['S2_direct_non_fvar'] and gates['S3_param_symbolic'] and gates['S6_protected_green']: verdict='OLD_CLOSURE_INSTANCE_SCOPE_OBSTRUCTION'
+          else: verdict='INCONCLUSIVE_V142_CONTROL_OR_APPARATUS'
+          result={'canonical_id':'V142_INSTANCE_SCOPED_OLD_CLOSURE','arms':arms,'protected':prot,'gates':gates,'verdict':verdict,'claim_boundary':'No K6 or constructor-development claim.'}
+          pathlib.Path('v142_result.json').write_text(json.dumps(result,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(result,indent=2,sort_keys=True))
+          PY
+
+      - name: Show diagnostics
+        if: always()
+        run: |
+          for f in v142_t*.log; do [ -e "$f" ] && { echo "===== $f ====="; cat "$f"; }; done
+          [ -e v142_result.json ] && cat v142_result.json || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v142-instance-scoped-old-closure
+          path: |
+            v142_*.json
+            v142_*.log
+            v142_admitted.patch
