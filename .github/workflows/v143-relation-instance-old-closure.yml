@@ -1,0 +1,82 @@
+name: V143 relation-instance old-closure separator
+on:
+  push:
+    branches: ["v143-relation-instance-old-closure"]
+  workflow_dispatch:
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {lint: "false", test: "false"}
+      - name: Apply exact K2 K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Materialize arms
+        run: |
+          cat > /tmp/V143Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          structure V143P where Meta : Type
+          def V143P0 : V143P := ⟨Unit⟩
+          inductive V143Box (p : V143P) : Type where | mk : p.Meta → V143Box p
+          inductive V143Has {p : V143P} [Plausible.Arbitrary p.Meta] : V143Box p → Prop where
+          | mk (x : p.Meta) : V143Has (V143Box.mk x)
+          EOF
+          cp /tmp/V143Common.lean /tmp/V143R0.lean
+          cat >> /tmp/V143R0.lean <<'EOF'
+          derive_mutual (fun (_ : Unit) => ∃ b : V143Box V143P0, @V143Has V143P0 inferInstance b)
+          EOF
+          cp /tmp/V143Common.lean /tmp/V143R1.lean
+          cat >> /tmp/V143R1.lean <<'EOF'
+          derive_mutual (fun (p : V143P) (inst : Plausible.Arbitrary p.Meta) (_ : Unit) => ∃ b : V143Box p, @V143Has p inst b)
+          EOF
+          cp /tmp/V143Common.lean /tmp/V143R2.lean
+          cat >> /tmp/V143R2.lean <<'EOF'
+          derive_mutual (fun (p : V143P) (inst : Plausible.Arbitrary p.Meta) (_ : Unit) => ∃ b : V143Box p, @V143Has p inst b)
+          #synth ArbitrarySizedSuchThat (V143Box V143P0) (fun b => @V143Has V143P0 inferInstance b)
+          EOF
+      - name: Run arms
+        run: |
+          python - <<'PY'
+          import subprocess,json,pathlib
+          out={}
+          for n,pth in {'R0_DIRECT':'/tmp/V143R0.lean','R1_PARAM_REL_INSTANCE':'/tmp/V143R1.lean','R2_FIXED_SPECIALIZATION':'/tmp/V143R2.lean'}.items():
+            p=subprocess.run(['lake','env','lean',pth],capture_output=True,text=True); log=p.stdout+p.stderr; pathlib.Path('v143_'+n.lower()+'.log').write_text(log); lo=log.lower()
+            if p.returncode==0: c='PASS'
+            elif 'expected to be a variable' in lo: c='NON_FVAR_APPLICABILITY'
+            elif 'failed to synthesize' in lo: c='SYNTHESIS_FAILURE'
+            else: c='OTHER_FAILURE'
+            out[n]={'rc':p.returncode,'class':c,'first_error':next((x for x in log.splitlines() if 'error' in x.lower()),'')}
+          pathlib.Path('v143_arms.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          PY
+      - name: Protected
+        run: |
+          set +e; lake build > v143_build.log 2>&1; B=$?; lake test > v143_test.log 2>&1; T=$?; set -e
+          printf '{"build":%s,"test":%s}\n' "$B" "$T" > v143_protected.json
+          [ "$B" -eq 0 ] && [ "$T" -eq 0 ]
+      - name: Verdict
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          a=json.loads(pathlib.Path('v143_arms.json').read_text()) if pathlib.Path('v143_arms.json').exists() else {}; p=json.loads(pathlib.Path('v143_protected.json').read_text()) if pathlib.Path('v143_protected.json').exists() else None; c=lambda k:a.get(k,{}).get('class')
+          g={'H1_exact_k2_k5_build':bool(a),'H2_direct_non_fvar':c('R0_DIRECT')=='NON_FVAR_APPLICABILITY','H3_param_relation_instance_pass':c('R1_PARAM_REL_INSTANCE')=='PASS','H4_fixed_specialization_pass':c('R2_FIXED_SPECIALIZATION')=='PASS','H5_protected_green':p is not None and p.get('build')==0 and p.get('test')==0}
+          if all(g.values()): v='REJECT_K6_RELATION_INSTANCE_CLOSURE_SUFFICES'
+          elif g['H1_exact_k2_k5_build'] and g['H2_direct_non_fvar'] and g['H5_protected_green']: v='OLD_CLOSURE_RELATION_INSTANCE_OBSTRUCTION'
+          else: v='R10_OR_CONTROL_INCONCLUSIVE'
+          r={'canonical_id':'V143_RELATION_INSTANCE_OLD_CLOSURE','arms':a,'gates':g,'protected':p,'verdict':v,'claim_boundary':'No K6 or constructor-development claim.'}; pathlib.Path('v143_result.json').write_text(json.dumps(r,indent=2)+'\n'); print(json.dumps(r,indent=2))
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          for f in v143_r*.log; do [ -e "$f" ] && { echo =====$f=====; cat "$f"; }; done
+          cat v143_result.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: v143-relation-instance-old-closure, path: "v143_*"}
