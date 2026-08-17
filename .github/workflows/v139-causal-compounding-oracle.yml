@@ -1,0 +1,71 @@
+name: V139 causal compounding oracle
+
+on:
+  push:
+    branches: [v139-causal-compounding-oracle]
+    paths:
+      - 'V139_CAUSAL_COMPOUNDING_ORACLE_PRECOMMIT.md'
+      - 'SpecimenTest/V139CrownOriginalFixed.lean'
+      - 'SpecimenTest/V139CrownSpecialized.lean'
+      - '.github/workflows/v139-causal-compounding-oracle.yml'
+
+jobs:
+  oracle:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          test: false
+          lint: false
+      - name: Apply K2 ancestor only
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Arm A ancestor ablation — K2 only specialized later task
+        run: |
+          set +e
+          lake env lean SpecimenTest/V139CrownSpecialized.lean > arm_a.log 2>&1
+          A=$?
+          set -e
+          echo "$A" > arm_a.rc
+          cat arm_a.log
+          echo "ARM_A_RC=$A"
+      - name: Add K5 ancestor state
+        run: |
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Arms B and C — pre-frontier vs later discovery
+        run: |
+          set +e
+          lake env lean SpecimenTest/V139CrownOriginalFixed.lean > arm_b.log 2>&1
+          B=$?
+          lake env lean SpecimenTest/V139CrownSpecialized.lean > arm_c.log 2>&1
+          C=$?
+          set -e
+          echo "$B" > arm_b.rc
+          echo "$C" > arm_c.rc
+          cat arm_b.log
+          cat arm_c.log
+          A=$(cat arm_a.rc)
+          printf '{"ancestor_ablation_k2_only_specialized":%s,"k2_k5_original_fixed":%s,"k2_k5_specialized":%s}\n' "$A" "$B" "$C" > v139_result.json
+          echo "A=$A B=$B C=$C"
+          if [ "$A" -ne 0 ] && [ "$B" -ne 0 ] && [ "$C" -eq 0 ]; then
+            echo 'PASS_V139_CAUSAL_COMPOUNDING_ORACLE'
+          elif [ "$A" -eq 0 ]; then
+            echo 'NULL_V139_NO_ANCESTOR_DEPENDENCE'
+          elif [ "$C" -ne 0 ]; then
+            echo 'NULL_V139_NO_LATER_DISCOVERY'
+          elif [ "$B" -eq 0 ]; then
+            echo 'R10_V139_FRONTIER_NOT_SEPARATED'
+          else
+            echo 'R10_V139_UNEXPECTED_PATTERN'
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v139-causal-compounding-oracle
+          path: |
+            arm_a.log
+            arm_b.log
+            arm_c.log
+            v139_result.json
