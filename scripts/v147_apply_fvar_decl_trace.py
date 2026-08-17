@@ -9,8 +9,12 @@ old = '''  | .fvar id =>
 new = '''  | .fvar id =>
     let localDecl ← FVarId.getDecl id
     -- V147 trace-only discriminator: preserve behavior exactly while exposing
-    -- the declaration available immediately before name-only IR conversion.
-    trace[plausible.deriving.arbitrary] m!"V147_FVAR_DECL name={localDecl.userName}; decl={localDecl}"
+    -- declaration kind/value immediately before name-only IR conversion.
+    match localDecl.value? with
+    | some value =>
+      trace[plausible.deriving.arbitrary] m!"V147_FVAR_DECL name={localDecl.userName}; isLet={localDecl.isLet}; value={value}"
+    | none =>
+      trace[plausible.deriving.arbitrary] m!"V147_FVAR_DECL name={localDecl.userName}; isLet={localDecl.isLet}; value=NONE"
     return ConstructorExpr.Unknown localDecl.userName
 '''
 count = text.count(old)
