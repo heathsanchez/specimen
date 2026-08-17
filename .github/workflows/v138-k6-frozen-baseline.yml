@@ -1,0 +1,45 @@
+name: V138 K6 frozen baseline
+on:
+  push:
+    branches: [v136-k6-preserve-fixed-root-specialization]
+    paths:
+      - 'SpecimenTest/V138K6*.lean'
+      - '.github/workflows/v138-k6-frozen-baseline.yml'
+      - 'scripts/v120_apply_binder_aware_fixed_parameter.py'
+      - 'scripts/v132_apply_output_dependent_input_determined.py'
+  workflow_dispatch:
+
+jobs:
+  baseline:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          test: false
+          lint: false
+      - name: Apply exact admitted K2 and K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Run frozen baseline arms
+        run: |
+          set +e
+          lake env lean SpecimenTest/V138K6Unit.lean > unit.log 2>&1; UNIT=$?
+          lake env lean SpecimenTest/V138K6Bool.lean > bool.log 2>&1; BOOL=$?
+          lake env lean SpecimenTest/V138K6Negative.lean > negative.log 2>&1; NEG=$?
+          lake env lean SpecimenTest/V138K6Generic.lean > generic.log 2>&1; GEN=$?
+          set -e
+          cat unit.log; cat bool.log; cat negative.log; cat generic.log
+          printf '{"unit":%s,"bool":%s,"negative":%s,"generic":%s}\n' "$UNIT" "$BOOL" "$NEG" "$GEN" > v138_baseline.json
+          echo "UNIT=$UNIT BOOL=$BOOL NEGATIVE=$NEG GENERIC=$GEN"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v138-k6-frozen-baseline
+          path: |
+            unit.log
+            bool.log
+            negative.log
+            generic.log
+            v138_baseline.json
