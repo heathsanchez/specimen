@@ -14,10 +14,11 @@ jobs:
         with:
           lint: false
           test: false
-      - name: Apply exact admitted K2 and K5
+      - name: Apply exact admitted K2 and K5 plus trace-only instrument
         run: |
           python scripts/v120_apply_binder_aware_fixed_parameter.py
           python scripts/v132_apply_output_dependent_input_determined.py
+          python scripts/v135_instrument_final_unify_state.py
           lake build Specimen.DeriveConstrainedProducer
       - name: Run trace-only fixed arm
         run: |
