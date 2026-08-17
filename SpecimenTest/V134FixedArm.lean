@@ -18,5 +18,4 @@ inductive V134Box (p : V134P) : Type where
 inductive V134Has {p : V134P} : V134Box p → Nat → Prop where
 | mk (x : p.Meta) (n : Nat) : V134Has (V134Box.mk x) n
 
-/-- FIXED arm: P0.Meta is definitionally Unit, so symbolic p.Meta obligations should disappear if specialization propagates before synthesis. -/
 derive_mutual (fun (n : Nat) => ∃ b : V134Box V134P0, @V134Has V134P0 b n)
