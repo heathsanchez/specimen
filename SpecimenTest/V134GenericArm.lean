@@ -18,5 +18,4 @@ inductive V134Box (p : V134P) : Type where
 inductive V134Has {p : V134P} : V134Box p → Nat → Prop where
 | mk (x : p.Meta) (n : Nat) : V134Has (V134Box.mk x) n
 
-/-- GENERIC control: arbitrary p should retain a parameter-dependent field obligation. -/
 derive_mutual (fun (p : V134P) (n : Nat) => ∃ b : V134Box p, V134Has b n)
