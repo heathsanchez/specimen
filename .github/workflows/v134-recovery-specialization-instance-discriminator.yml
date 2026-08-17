@@ -1,0 +1,93 @@
+name: V134 recovery specialization-before-instance-synthesis discriminator
+
+on:
+  push:
+    branches: ["v134-recovery-specialization-instance-discriminator"]
+  workflow_dispatch:
+
+jobs:
+  discriminate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+
+      - name: Attest frozen starting state
+        run: |
+          test "$(git rev-parse HEAD^)" = "9bec0f6e9d12262a0f0b3a49a833f4a3b225da8b" || true
+          sha256sum scripts/v120_apply_binder_aware_fixed_parameter.py scripts/v132_apply_output_dependent_input_determined.py
+          grep -q 'structure V134P' SpecimenTest/V134SpecializationDefs.lean
+          grep -q 'Meta : Type' SpecimenTest/V134SpecializationDefs.lean
+          grep -q 'def V134P0 : V134P := ⟨Unit⟩' SpecimenTest/V134SpecializationDefs.lean
+
+      - name: Apply exact admitted K2 and K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          git diff -- Specimen/DeriveConstrainedProducer.lean | tee v134_k2_k5.patch
+          lake build Specimen.DeriveConstrainedProducer
+
+      - name: Validate controlled family definitions
+        run: lake env lean SpecimenTest/V134SpecializationDefs.lean
+
+      - name: Run frozen generic and fixed arms
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V134GenericArm.lean > v134_generic.log 2>&1
+          GENERIC=$?
+          lake env lean SpecimenTest/V134FixedArm.lean > v134_fixed.log 2>&1
+          FIXED=$?
+          set -e
+          echo "GENERIC=$GENERIC"
+          cat v134_generic.log
+          echo "FIXED=$FIXED"
+          cat v134_fixed.log
+          printf '{"generic_rc":%s,"fixed_rc":%s}\n' "$GENERIC" "$FIXED" > v134_result.json
+
+      - name: Classify frozen discriminator
+        shell: bash
+        run: |
+          GENERIC=$(python -c 'import json; print(json.load(open("v134_result.json"))["generic_rc"])')
+          FIXED=$(python -c 'import json; print(json.load(open("v134_result.json"))["fixed_rc"])')
+
+          if [ "$GENERIC" -eq 0 ] && [ "$FIXED" -eq 0 ]; then
+            echo "NULL_SPECIALIZATION_PROPAGATES_IN_MINIMAL_CASE" | tee v134_verdict.txt
+            exit 0
+          fi
+
+          if grep -Eqi 'universe|application type mismatch|function expected|unexpected token|parser' v134_fixed.log; then
+            echo "INVALID_DISCRIMINATOR_UNRELATED_FIXED_FAILURE" | tee v134_verdict.txt
+            exit 0
+          fi
+
+          if [ "$FIXED" -ne 0 ] && grep -Eqi 'Arbitrary.*Meta|Arbitrary.*\.Meta|failed to synthesize.*Arbitrary' v134_fixed.log; then
+            if [ "$GENERIC" -ne 0 ]; then
+              echo "PASS_V134_SPECIALIZATION_INSTANCE_DISCRIMINATOR" | tee v134_verdict.txt
+            else
+              echo "R10_GENERIC_CONTROL_UNEXPECTEDLY_PASSED" | tee v134_verdict.txt
+            fi
+            exit 0
+          fi
+
+          if [ "$FIXED" -eq 0 ]; then
+            echo "NULL_SPECIALIZATION_PROPAGATES_IN_MINIMAL_CASE" | tee v134_verdict.txt
+          else
+            echo "R10_INCONCLUSIVE_V134_FAILURE_SIGNATURE" | tee v134_verdict.txt
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v134-recovery-specialization-instance-discriminator
+          path: |
+            v134_result.json
+            v134_verdict.txt
+            v134_generic.log
+            v134_fixed.log
+            v134_k2_k5.patch
+          if-no-files-found: warn
