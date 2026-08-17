@@ -1,0 +1,47 @@
+name: V137 specialized-root oracle
+
+on:
+  push:
+    branches: [v136-k6-preserve-fixed-root-specialization]
+  workflow_dispatch:
+
+jobs:
+  oracle:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: false
+          test: false
+      - name: Apply exact admitted K2 and K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Run original fixed and specialized oracle
+        run: |
+          set +e
+          lake env lean SpecimenTest/V137OriginalFixed.lean > v137_original.log 2>&1
+          ORIGINAL_RC=$?
+          lake env lean SpecimenTest/V137SpecializedRelation.lean > v137_specialized.log 2>&1
+          SPECIAL_RC=$?
+          set -e
+          cat v137_original.log
+          cat v137_specialized.log
+          printf '{"original_rc":%s,"specialized_rc":%s}\n' "$ORIGINAL_RC" "$SPECIAL_RC" > v137_result.json
+          echo "ORIGINAL_RC=$ORIGINAL_RC SPECIALIZED_RC=$SPECIAL_RC"
+          if [ "$ORIGINAL_RC" -ne 0 ] && [ "$SPECIAL_RC" -eq 0 ]; then
+            echo 'PASS_V137_ROOT_SPECIALIZATION_SUFFICIENT_ORACLE'
+          elif [ "$ORIGINAL_RC" -ne 0 ] && [ "$SPECIAL_RC" -ne 0 ]; then
+            echo 'NULL_V137_SPECIALIZATION_NOT_SUFFICIENT'
+          else
+            echo 'R10_V137_UNEXPECTED_PATTERN'
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v137-specialized-root-oracle
+          path: |
+            v137_original.log
+            v137_specialized.log
+            v137_result.json
