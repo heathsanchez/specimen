@@ -1,0 +1,36 @@
+name: V135 trace fixed specialization state
+
+on:
+  push:
+    branches: [v135-k6-specialize-before-instance-synthesis]
+  workflow_dispatch:
+
+jobs:
+  trace-fixed:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: false
+          test: false
+      - name: Apply exact admitted K2 and K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Run trace-only fixed arm
+        run: |
+          set +e
+          lake env lean SpecimenTest/V135TraceFixed.lean > v135_trace_fixed.log 2>&1
+          RC=$?
+          set -e
+          echo "RC=$RC"
+          cat v135_trace_fixed.log
+          printf '{"rc":%s}\n' "$RC" > v135_trace_result.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v135-k6-trace-fixed
+          path: |
+            v135_trace_fixed.log
+            v135_trace_result.json
