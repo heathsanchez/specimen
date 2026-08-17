@@ -16,7 +16,7 @@ jobs:
       - name: Apply K2 only
         run: |
           python scripts/v120_apply_binder_aware_fixed_parameter.py
-          lake build Specimen
+          lake build Specimen SpecimenTest
       - name: Arm A K2
         shell: bash
         run: |
@@ -29,7 +29,7 @@ jobs:
       - name: Add K5
         run: |
           python scripts/v132_apply_output_dependent_input_determined.py
-          lake build Specimen
+          lake build Specimen SpecimenTest
       - name: Arm B K2 plus K5
         shell: bash
         run: |
