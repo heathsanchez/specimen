@@ -4,14 +4,40 @@ open Lambda
 
 abbrev V140ST0 : LExprParams := ⟨Unit, Unit⟩
 abbrev V140SExpr := LExpr V140ST0.mono
-abbrev V140SHasType (Δ : List LMonoTy) (e : V140SExpr) (τ : LMonoTy) : Prop :=
-  LExpr.HasTypeA (T := V140ST0) Δ e τ
+
+/- V140B APPARATUS-ONLY REPAIR.
+   This is the exact HasTypeA constructor grammar from the vendored Strata slice,
+   materialized as an inductive at the already-frozen concrete specialization.
+   No typing rule, constructor condition, search law, K2/K5 patch, or task has
+   changed. The prior reducible alias was rejected by derive_mutual because it
+   was not itself an inductive declaration. -/
+inductive V140SHasType : List LMonoTy → V140SExpr → LMonoTy → Prop where
+  | const : V140SHasType Δ (.const m c) c.ty
+  | op    : V140SHasType Δ (.op m o (some ty)) ty
+  | fvar  : V140SHasType Δ (.fvar m x (some ty)) ty
+  | bvar  : Δ[i]? = some t → V140SHasType Δ (.bvar m i) t
+  | abs   : V140SHasType (aty :: Δ) body rty →
+            V140SHasType Δ (.abs m name (some aty) body) (.arrow aty rty)
+  | quant : V140SHasType (qty :: Δ) tr τ_tr →
+            V140SHasType (qty :: Δ) body .bool →
+            V140SHasType Δ (.quant m k name (some qty) tr body) .bool
+  | app   : V140SHasType Δ fn (.arrow aty rty) →
+            V140SHasType Δ arg aty →
+            V140SHasType Δ (.app m fn arg) rty
+  | ite   : V140SHasType Δ c .bool →
+            V140SHasType Δ t τ →
+            V140SHasType Δ e τ →
+            V140SHasType Δ (.ite m c t e) τ
+  | eq    : V140SHasType Δ e1 τ →
+            V140SHasType Δ e2 τ →
+            V140SHasType Δ (.eq m e1 e2) .bool
 
 #guard_msgs(drop info, drop warning) in
 derive_mutual
   (fun (Δ : List LMonoTy) (τ : LMonoTy) =>
     ∃ e : V140SExpr, V140SHasType Δ e τ)
 
+/- Exact executable checker used by the historical V118 Strata transfer gate. -/
 def v140TypeCheck (ctx : List LMonoTy) : V140SExpr → Option LMonoTy
   | .const _ c => some c.ty
   | .op _ _ (some ty) => some ty
@@ -33,7 +59,7 @@ def v140TypeCheck (ctx : List LMonoTy) : V140SExpr → Option LMonoTy
   | .ite _ c t e =>
       match v140TypeCheck ctx c, v140TypeCheck ctx t, v140TypeCheck ctx e with
       | some (.tcons "bool" []), some tt, some et => if tt = et then some tt else none
-      | _, _ => none
+      | _, _, _ => none
   | .eq _ a b =>
       match v140TypeCheck ctx a, v140TypeCheck ctx b with
       | some ta, some tb => if ta = tb then some .bool else none
