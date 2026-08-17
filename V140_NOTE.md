@@ -1,0 +1,1 @@
+V140 execution will be run from the immutable V118 Strata substrate (`8b8fc8d65d1dd4d43c24b83fdbda0bdc0d436966`) on a dedicated branch. This branch contains only the preregistration copy and is not the execution substrate.
