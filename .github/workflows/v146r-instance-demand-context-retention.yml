@@ -1,0 +1,128 @@
+name: V146R instance-demand context retention
+
+on:
+  push:
+    branches: ["v145-k6-fixed-input-let-execution"]
+    paths:
+      - 'scripts/v146r_apply_instance_demand_context_trace.py'
+      - '.github/workflows/v146r-instance-demand-context-retention.yml'
+  workflow_dispatch:
+
+jobs:
+  v146r:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+
+      - name: Execute frozen trace-only diagnostic
+        shell: bash
+        run: |
+          set -u
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          python scripts/v145_apply_fixed_input_let.py
+          python scripts/v146r_apply_instance_demand_context_trace.py
+          git diff -- Specimen/MExp.lean > v146r_patch.diff
+
+          lake build Specimen.MExp Specimen.DeriveConstrainedProducer > v146r_module.log 2>&1
+
+          cat > /tmp/V146RDirect.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          set_option trace.plausible.deriving.arbitrary true
+          structure V146RP where Meta : Type
+          def V146RP0 : V146RP := ⟨Unit⟩
+          inductive V146RBox (p : V146RP) : Type where
+          | mk : p.Meta → V146RBox p
+          inductive V146RHas {p : V146RP} : V146RBox p → Prop where
+          | mk (x : p.Meta) : V146RHas (V146RBox.mk x)
+          derive_mutual (fun (_ : Unit) => ∃ b : V146RBox V146RP0, V146RHas b)
+          EOF
+
+          cat > /tmp/V146RGeneric.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          set_option trace.plausible.deriving.arbitrary true
+          structure V146RGP where Meta : Type
+          inductive V146RGBox (p : V146RGP) : Type where
+          | mk : p.Meta → V146RGBox p
+          inductive V146RGHas {p : V146RGP} : V146RGBox p → Prop where
+          | mk (x : p.Meta) : V146RGHas (V146RGBox.mk x)
+          derive_mutual (fun (p : V146RGP) (_ : Unit) => ∃ b : V146RGBox p, V146RGHas b)
+          EOF
+
+          set +e
+          lake env lean /tmp/V146RDirect.lean > v146r_direct.log 2>&1
+          DRC=$?
+          lake env lean /tmp/V146RGeneric.lean > v146r_generic.log 2>&1
+          GRC=$?
+          lake build > v146r_full_build.log 2>&1
+          BRC=$?
+          if [ "$BRC" -eq 0 ]; then
+            lake test > v146r_full_test.log 2>&1
+            TRC=$?
+          else
+            TRC=99
+            echo skipped > v146r_full_test.log
+          fi
+          set -e
+
+          python - <<PY
+          import json, pathlib, re
+          d=pathlib.Path('v146r_direct.log').read_text()
+          g=pathlib.Path('v146r_generic.log').read_text()
+          patch=pathlib.Path('v146r_patch.diff').read_text()
+          demand_lines=[x for x in d.splitlines() if 'V146R_DEMAND=' in x]
+          fixed_lines=[x for x in demand_lines if 'fixedInput' in x and '.Meta' in x]
+          fixed_present_in_context=any(re.search(r'V146R_LCTX_NAMES=.*fixedInput', x) for x in fixed_lines)
+          fixed_demand_seen=bool(fixed_lines)
+          direct_residual=('failed to synthesize' in d.lower() and 'fixedinput' in d.lower() and '.meta' in d.lower())
+          generic_residual=('failed to synthesize' in g.lower() and '.meta' in g.lower())
+          forbidden=[x for x in ['V146RP0','V146RBox','V146RHas','Strata'] if x in patch]
+          protected=($BRC==0 and $TRC==0)
+          if fixed_demand_seen and not fixed_present_in_context and direct_residual and generic_residual and protected and not forbidden:
+              verdict='CONTEXT_BINDING_DROPPED_BEFORE_INSTANCE_DEMAND'
+          elif fixed_demand_seen and fixed_present_in_context and direct_residual and generic_residual and protected and not forbidden:
+              verdict='FIXED_BINDING_RETAINED_AT_INSTANCE_DEMAND'
+          else:
+              verdict='INVALID_DIAGNOSTIC'
+          out={
+            'canonical_id':'V146R_INSTANCE_DEMAND_CONTEXT_RETENTION',
+            'direct_rc':$DRC,'generic_rc':$GRC,
+            'protected_build_rc':$BRC,'protected_test_rc':$TRC,
+            'fixed_demand_seen':fixed_demand_seen,
+            'fixed_present_in_context_at_same_demand':fixed_present_in_context,
+            'direct_v145_residual_preserved':direct_residual,
+            'generic_symbolic_residual_preserved':generic_residual,
+            'forbidden_patch_tokens':forbidden,
+            'matching_trace_lines':fixed_lines[-10:],
+            'verdict':verdict,
+            'claim_boundary':'Trace-only localization of context retention; no K6 admission or constructor-development claim.'
+          }
+          pathlib.Path('v146r_result.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+
+      - name: Show diagnostic
+        if: always()
+        run: |
+          cat v146r_result.json || true
+          echo '--- fixed demand traces ---'
+          grep 'V146R_DEMAND=' v146r_direct.log | grep -i 'fixedInput' | tail -20 || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v146r-context-retention
+          path: |
+            v146r_result.json
+            v146r_*.log
+            v146r_patch.diff
+          if-no-files-found: warn
