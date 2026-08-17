@@ -6,7 +6,7 @@ open Plausible
 
 set_option specimen.autoDeriveDeps true
 set_option specimen.multiOutput true
-set_option trace.plausible.deriving.arbitrary true
+set_option trace.plausible.deriving.results true
 
 structure V135TraceP where
   Meta : Type
