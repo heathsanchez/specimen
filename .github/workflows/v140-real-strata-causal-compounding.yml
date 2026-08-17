@@ -1,0 +1,70 @@
+name: V140 real Strata causal compounding
+
+on:
+  push:
+    branches: ["v140-real-strata-causal-compounding"]
+  workflow_dispatch:
+
+jobs:
+  oracle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply K2 ancestor only
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          lake build Specimen SpecimenTest
+      - name: Arm A — K2 only specialized real Strata
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V140StrataSpecialized.lean > arm_a.log 2>&1
+          A=$?
+          set -e
+          echo "$A" > arm_a.rc
+          cat arm_a.log
+          echo "ARM_A_RC=$A"
+      - name: Add K5 ancestor state
+        run: |
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen SpecimenTest
+      - name: Arms B/C — fixed root versus specialized real Strata
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V140StrataOriginalFixed.lean > arm_b.log 2>&1
+          B=$?
+          lake env lean SpecimenTest/V140StrataSpecialized.lean > arm_c.log 2>&1
+          C=$?
+          set -e
+          A=$(cat arm_a.rc)
+          cat arm_b.log
+          cat arm_c.log
+          printf '{"k2_only_specialized":%s,"k2_k5_original_fixed":%s,"k2_k5_specialized":%s}\n' "$A" "$B" "$C" > v140_result.json
+          echo "A=$A B=$B C=$C"
+          if grep -qE 'Expected inductive type application|unknown constant.*V140SHasType|not an inductive|application type mismatch.*V140SHasType' arm_a.log arm_c.log; then
+            echo 'R10_V140_SPECIALIZED_ALIAS_APPARATUS'
+          elif [ "$A" -ne 0 ] && [ "$B" -ne 0 ] && [ "$C" -eq 0 ] && grep -q 'V140_REAL_STRATA_SAMPLES_OK=40' arm_c.log; then
+            echo 'PASS_V140_REAL_STRATA_CAUSAL_COMPOUNDING'
+          elif [ "$A" -eq 0 ]; then
+            echo 'NULL_V140_NO_ANCESTOR_DEPENDENCE'
+          elif [ "$C" -ne 0 ]; then
+            echo 'NULL_V140_NO_LATER_FRONTIER_ADVANCE'
+          elif [ "$B" -eq 0 ]; then
+            echo 'R10_V140_FRONTIER_NOT_SEPARATED'
+          else
+            echo 'R10_V140_UNEXPECTED_PATTERN'
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v140-real-strata-causal-compounding
+          path: |
+            arm_a.log
+            arm_b.log
+            arm_c.log
+            v140_result.json
