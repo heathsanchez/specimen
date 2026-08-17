@@ -1,0 +1,60 @@
+name: V141 recursive dependent-pair frontier
+on:
+  push:
+    branches: ["v141-recursive-pair-frontier"]
+  workflow_dispatch:
+
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply K2 only
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          lake build Specimen
+      - name: Arm A K2
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V141RecursivePairFrontier.lean > arm_a.log 2>&1
+          A=$?
+          set -e
+          echo "$A" > arm_a.rc
+          cat arm_a.log
+      - name: Add K5
+        run: |
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen
+      - name: Arm B K2 plus K5
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V141RecursivePairFrontier.lean > arm_b.log 2>&1
+          B=$?
+          set -e
+          A=$(cat arm_a.rc)
+          cat arm_b.log
+          printf '{"k2":%s,"k2_k5":%s}\n' "$A" "$B" > v141_result.json
+          echo "A=$A B=$B"
+          if [ "$A" -ne 0 ] && [ "$B" -eq 0 ]; then
+            echo 'PASS_V141_K5_UNLOCKS_RECURSIVE_DEPENDENT_PAIR'
+          elif [ "$A" -eq 0 ] && [ "$B" -eq 0 ]; then
+            echo 'NULL_V141_CORE_ALREADY_SUPPORTED'
+          elif [ "$A" -ne 0 ] && [ "$B" -ne 0 ]; then
+            echo 'QUALIFIED_V141_CORE_RECURSIVE_PAIR_RESIDUAL'
+          else
+            echo 'R10_V141_UNEXPECTED_PATTERN'
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v141-recursive-pair-frontier
+          path: |
+            arm_a.log
+            arm_b.log
+            v141_result.json
