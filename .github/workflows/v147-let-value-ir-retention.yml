@@ -1,0 +1,119 @@
+name: V147 let-value IR retention
+
+on:
+  push:
+    branches: ["v147-let-value-ir-retention"]
+    paths:
+      - 'scripts/v147_apply_fvar_decl_trace.py'
+      - '.github/workflows/v147-let-value-ir-retention.yml'
+  workflow_dispatch:
+
+jobs:
+  v147:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+
+      - name: Execute frozen V147 diagnostic
+        shell: bash
+        run: |
+          set -u
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          python scripts/v145_apply_fixed_input_let.py
+          python scripts/v147_apply_fvar_decl_trace.py
+          git diff -- Specimen/Schedules.lean > v147_patch.diff
+          lake build Specimen.Schedules Specimen.DeriveConstrainedProducer > v147_module.log 2>&1
+
+          cat > /tmp/V147Direct.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          set_option trace.plausible.deriving.arbitrary true
+          structure V147P where Meta : Type
+          def V147P0 : V147P := ⟨Unit⟩
+          inductive V147Box (p : V147P) : Type where
+          | mk : p.Meta → V147Box p
+          inductive V147Has {p : V147P} : V147Box p → Prop where
+          | mk (x : p.Meta) : V147Has (V147Box.mk x)
+          derive_mutual (fun (_ : Unit) => ∃ b : V147Box V147P0, V147Has b)
+          EOF
+
+          cat > /tmp/V147Generic.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+          set_option trace.plausible.deriving.arbitrary true
+          structure V147GP where Meta : Type
+          inductive V147GBox (p : V147GP) : Type where
+          | mk : p.Meta → V147GBox p
+          inductive V147GHas {p : V147GP} : V147GBox p → Prop where
+          | mk (x : p.Meta) : V147GHas (V147GBox.mk x)
+          derive_mutual (fun (p : V147GP) (_ : Unit) => ∃ b : V147GBox p, V147GHas b)
+          EOF
+
+          set +e
+          lake env lean /tmp/V147Direct.lean > v147_direct.log 2>&1; DRC=$?
+          lake env lean /tmp/V147Generic.lean > v147_generic.log 2>&1; GRC=$?
+          lake build > v147_full_build.log 2>&1; BRC=$?
+          if [ "$BRC" -eq 0 ]; then lake test > v147_full_test.log 2>&1; TRC=$?; else TRC=99; echo skipped > v147_full_test.log; fi
+          set -e
+
+          python - <<PY
+          import json, pathlib, re
+          d=pathlib.Path('v147_direct.log').read_text()
+          g=pathlib.Path('v147_generic.log').read_text()
+          patch=pathlib.Path('v147_patch.diff').read_text()
+          traces=[x for x in d.splitlines() if 'V147_FVAR_DECL' in x and 'fixedInput' in x]
+          direct_residual=('failed to synthesize' in d.lower() and 'fixedinput' in d.lower() and '.meta' in d.lower())
+          generic_residual=('failed to synthesize' in g.lower() and '.meta' in g.lower())
+          # Lean LocalDecl Repr renders let declarations distinctly; retain raw trace as primary evidence.
+          has_let=any(('letDecl' in x or 'value :=' in x or 'value :=' in x.lower()) for x in traces)
+          value_mentions_fixed=any(('V147P0' in x or 'V147P.mk' in x or 'Unit' in x) for x in traces)
+          forbidden=[x for x in ['V147P0','V147Box','V147Has','Strata'] if x in patch]
+          protected=($BRC==0 and $TRC==0)
+          if traces and has_let and value_mentions_fixed and direct_residual and generic_residual and protected and not forbidden:
+              verdict='PASS_V147_VALUE_PRESENT_THEN_DISCARDED_AT_IR'
+          elif traces and direct_residual and generic_residual and protected and not forbidden:
+              verdict='PASS_V147_FIXED_FVAR_REACHED_IR_VALUE_STATUS_UNRESOLVED'
+          else:
+              verdict='INVALID_V147_DIAGNOSTIC'
+          out={
+            'canonical_id':'V147_LET_VALUE_IR_RETENTION',
+            'direct_rc':$DRC,'generic_rc':$GRC,
+            'protected_build_rc':$BRC,'protected_test_rc':$TRC,
+            'direct_v145_residual_preserved':direct_residual,
+            'generic_symbolic_residual_preserved':generic_residual,
+            'fixed_fvar_trace_count':len(traces),
+            'trace_indicates_let_decl':has_let,
+            'trace_value_mentions_fixed_expression':value_mentions_fixed,
+            'forbidden_patch_tokens':forbidden,
+            'matching_trace_lines':traces[-20:],
+            'verdict':verdict,
+            'claim_boundary':'Trace-only localization at fvar-to-ConstructorExpr boundary; no K6 admission or constructor-development claim.'
+          }
+          pathlib.Path('v147_result.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+
+      - name: Show V147 result
+        if: always()
+        run: |
+          cat v147_result.json || true
+          echo '--- fixed-input fvar traces ---'
+          grep 'V147_FVAR_DECL' v147_direct.log | grep -i fixedInput | tail -30 || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v147-let-value-ir-retention
+          path: |
+            v147_result.json
+            v147_*.log
+            v147_patch.diff
+          if-no-files-found: warn
