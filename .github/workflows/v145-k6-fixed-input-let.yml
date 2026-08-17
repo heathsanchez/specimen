@@ -1,0 +1,185 @@
+name: V145 K6 fixed-input let
+
+on:
+  push:
+    branches: ["v145-k6-fixed-input-let-execution"]
+    paths:
+      - 'scripts/v145_apply_fixed_input_let.py'
+      - '.github/workflows/v145-k6-fixed-input-let.yml'
+  workflow_dispatch:
+
+jobs:
+  v145:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+
+      - name: Freeze V145 fixtures
+        run: |
+          cat > /tmp/V145Common.lean <<'EOF'
+          import Plausible.Arbitrary
+          import Specimen.ArbitrarySizedSuchThat
+          import Specimen.DeriveConstrainedProducer
+
+          structure V145P where
+            Meta : Type
+
+          def V145P0 : V145P := ⟨Unit⟩
+
+          inductive V145Box (p : V145P) : Type where
+          | mk : p.Meta → V145Box p
+
+          inductive V145Has {p : V145P} : V145Box p → Prop where
+          | mk (x : p.Meta) : V145Has (V145Box.mk x)
+          EOF
+
+          cp /tmp/V145Common.lean /tmp/V145Direct.lean
+          cat >> /tmp/V145Direct.lean <<'EOF'
+
+          derive_mutual (fun (_ : Unit) => ∃ b : V145Box V145P0, V145Has b)
+          #synth ArbitrarySizedSuchThat (V145Box V145P0) (fun b => V145Has b)
+          EOF
+
+          cp /tmp/V145Common.lean /tmp/V145Generic.lean
+          cat >> /tmp/V145Generic.lean <<'EOF'
+
+          derive_mutual (fun (p : V145P) (_ : Unit) => ∃ b : V145Box p, V145Has b)
+          EOF
+
+      - name: Execute frozen B I A G protocol
+        shell: bash
+        run: |
+          set -u
+          python - <<'PY'
+          import json, pathlib, subprocess
+
+          def run(cmd, log, timeout=3600):
+              p = subprocess.run(cmd, text=True, capture_output=True, timeout=timeout)
+              out = p.stdout + p.stderr
+              pathlib.Path(log).write_text(out)
+              return p.returncode, out
+
+          def classify(rc, log):
+              low = log.lower()
+              if rc == 0:
+                  return 'PASS'
+              if 'expected to be a variable' in low:
+                  return 'NON_FVAR_APPLICABILITY'
+              if 'failed to synthesize' in low and ('arbitrary' in low or 'instance' in low) and 'meta' in low:
+                  return 'SYMBOLIC_INSTANCE'
+              return 'OTHER_FAILURE'
+
+          source = 'Specimen/DeriveConstrainedProducer.lean'
+          out = {
+              'canonical_id': 'V145_K6_FIXED_INPUT_LET',
+              'frozen_protocol': 'experiments/V145_K6_FIXED_INPUT_LET_PRECOMMIT.md',
+          }
+
+          # B — exact admitted K2+K5, no K6.
+          k2rc, _ = run(['python','scripts/v120_apply_binder_aware_fixed_parameter.py'], 'v145_B_apply_k2.log')
+          k5rc, _ = run(['python','scripts/v132_apply_output_dependent_input_determined.py'], 'v145_B_apply_k5.log')
+          bmrc, bmlog = run(['lake','build','Specimen.DeriveConstrainedProducer'], 'v145_B_module.log')
+          if bmrc == 0:
+              brc, blog = run(['lake','env','lean','/tmp/V145Direct.lean'], 'v145_B_direct.log')
+          else:
+              brc, blog = 99, bmlog
+              pathlib.Path('v145_B_direct.log').write_text(blog)
+          bclass = classify(brc, blog)
+          out['B'] = {'k2_rc': k2rc, 'k5_rc': k5rc, 'module_rc': bmrc, 'rc': brc, 'class': bclass}
+
+          # I — exact K2+K5 plus frozen K6_FIXED_INPUT_LET.
+          k6rc, k6log = run(['python','scripts/v145_apply_fixed_input_let.py'], 'v145_I_apply_k6.log')
+          patch = subprocess.run(['git','diff','--',source], text=True, capture_output=True).stdout
+          pathlib.Path('v145_k6.patch').write_text(patch)
+          forbidden = [x for x in ['V145P0','V145Box','V145Has','Strata'] if x in patch]
+          imrc, imlog = run(['lake','build','Specimen.DeriveConstrainedProducer'], 'v145_I_module.log') if k6rc == 0 else (99, k6log)
+          if imrc == 0:
+              irc, ilog = run(['lake','env','lean','/tmp/V145Direct.lean'], 'v145_I_direct.log')
+              grc, glog = run(['lake','env','lean','/tmp/V145Generic.lean'], 'v145_G_generic.log')
+          else:
+              irc, ilog = 99, imlog
+              grc, glog = 99, imlog
+              pathlib.Path('v145_I_direct.log').write_text(ilog)
+              pathlib.Path('v145_G_generic.log').write_text(glog)
+          iclass = classify(irc, ilog)
+          gclass = classify(grc, glog)
+          out['I'] = {'apply_rc': k6rc, 'module_rc': imrc, 'rc': irc, 'class': iclass, 'forbidden_patch_tokens': forbidden}
+          out['G'] = {'rc': grc, 'class': gclass}
+
+          # Protected surface under I.
+          if imrc == 0:
+              pbrc, _ = run(['lake','build'], 'v145_I_full_build.log')
+              ptrc, _ = run(['lake','test'], 'v145_I_full_test.log') if pbrc == 0 else (99, 'skipped')
+              if pbrc != 0:
+                  pathlib.Path('v145_I_full_test.log').write_text('skipped after build failure\n')
+          else:
+              pbrc = ptrc = 99
+              pathlib.Path('v145_I_full_build.log').write_text('skipped: K6 module did not build\n')
+              pathlib.Path('v145_I_full_test.log').write_text('skipped: K6 module did not build\n')
+          out['protected'] = {'build_rc': pbrc, 'test_rc': ptrc}
+
+          # A — targeted removal of K6; restore exact source then replay K2+K5.
+          run(['git','checkout','--',source], 'v145_A_restore.log')
+          run(['python','scripts/v120_apply_binder_aware_fixed_parameter.py'], 'v145_A_apply_k2.log')
+          run(['python','scripts/v132_apply_output_dependent_input_determined.py'], 'v145_A_apply_k5.log')
+          amrc, amlog = run(['lake','build','Specimen.DeriveConstrainedProducer'], 'v145_A_module.log')
+          if amrc == 0:
+              arc, alog = run(['lake','env','lean','/tmp/V145Direct.lean'], 'v145_A_direct.log')
+          else:
+              arc, alog = 99, amlog
+              pathlib.Path('v145_A_direct.log').write_text(alog)
+          aclass = classify(arc, alog)
+          out['A'] = {'module_rc': amrc, 'rc': arc, 'class': aclass}
+
+          gates = {
+              'G1_B_reproduces_non_fvar': bmrc == 0 and bclass == 'NON_FVAR_APPLICABILITY',
+              'G2_I_elaborates_and_synthesizes': imrc == 0 and iclass == 'PASS',
+              'G3_A_restores_B_failure': amrc == 0 and aclass == 'NON_FVAR_APPLICABILITY',
+              'G4_symbolic_control_preserved': imrc == 0 and gclass == 'SYMBOLIC_INSTANCE',
+              'G5_full_protected_pass': pbrc == 0 and ptrc == 0,
+              'G6_patch_source_generic': len(forbidden) == 0,
+          }
+          out['gates'] = gates
+
+          if k6rc != 0 or imrc != 0:
+              verdict = 'R10_V145_K6_IMPLEMENTATION_OR_COMPOSITION'
+          elif all(gates.values()):
+              verdict = 'PASS_V145_K6_LOCAL_CAUSAL_ONLY'
+          elif gates['G1_B_reproduces_non_fvar'] and iclass != 'NON_FVAR_APPLICABILITY':
+              verdict = 'V145_K6_MOVED_RESIDUAL_NOT_ADMITTED'
+          elif not gates['G5_full_protected_pass']:
+              verdict = 'INVALID_V145_PROTECTED_REGRESSION'
+          else:
+              verdict = 'NULL_OR_RESIDUAL_V145'
+
+          out['verdict'] = verdict
+          out['claim_boundary'] = 'A local causal pass does not admit K6; held-out/source-distinct transfer, protected replay, and later-frontier movement remain required.'
+          pathlib.Path('v145_result.json').write_text(json.dumps(out, indent=2, sort_keys=True) + '\n')
+          print(json.dumps(out, indent=2, sort_keys=True))
+          PY
+
+      - name: Show V145 result
+        if: always()
+        run: |
+          cat v145_result.json || true
+          echo '--- intervention module diagnostics ---'
+          cat v145_I_module.log || true
+          echo '--- intervention direct diagnostics ---'
+          cat v145_I_direct.log || true
+          echo '--- generic diagnostics ---'
+          cat v145_G_generic.log || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v145-k6-fixed-input-let
+          path: |
+            v145_result.json
+            v145_*.log
+            v145_k6.patch
+          if-no-files-found: warn
