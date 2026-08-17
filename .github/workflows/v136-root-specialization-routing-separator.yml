@@ -1,0 +1,52 @@
+name: V136 root specialization routing separator
+
+on:
+  push:
+    branches: [v136-k6-preserve-fixed-root-specialization]
+  workflow_dispatch:
+
+jobs:
+  separator:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: false
+          test: false
+      - name: Apply exact admitted K2 and K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen.DeriveConstrainedProducer
+      - name: Run matched AUTO_ON and AUTO_OFF arms
+        run: |
+          set +e
+          lake env lean SpecimenTest/V136FixedAutoOn.lean > v136_auto_on.log 2>&1
+          ON_RC=$?
+          lake env lean SpecimenTest/V136FixedAutoOff.lean > v136_auto_off.log 2>&1
+          OFF_RC=$?
+          set -e
+          cat v136_auto_on.log
+          cat v136_auto_off.log
+          python - <<'PY'
+          import json, os
+          on=int(os.environ['ON_RC']) if 'ON_RC' in os.environ else None
+          off=int(os.environ['OFF_RC']) if 'OFF_RC' in os.environ else None
+          PY
+          printf '{"auto_on_rc":%s,"auto_off_rc":%s}\n' "$ON_RC" "$OFF_RC" > v136_result.json
+          echo "AUTO_ON_RC=$ON_RC AUTO_OFF_RC=$OFF_RC"
+          if [ "$ON_RC" -ne 0 ] && [ "$OFF_RC" -eq 0 ]; then
+            echo 'PASS_V136_AUTO_DERIVE_ROOT_GENERICIZATION_ISOLATED'
+          elif [ "$ON_RC" -ne 0 ] && [ "$OFF_RC" -ne 0 ]; then
+            echo 'NULL_V136_COMMON_PATH_SPECIALIZATION_LOSS'
+          else
+            echo 'R10_V136_UNEXPECTED_ROUTING_PATTERN'
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v136-root-specialization-routing-separator
+          path: |
+            v136_auto_on.log
+            v136_auto_off.log
+            v136_result.json
