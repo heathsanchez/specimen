@@ -1,0 +1,62 @@
+name: V142 fixed parameter-carriage separator
+on:
+  push:
+    branches: ["v142-fixed-parameter-carriage-separator"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact K2 plus K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen SpecimenTest
+      - name: Parameter-erased historical control
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/StrataLexprGen.lean > erased.log 2>&1
+          E=$?
+          set -e
+          echo "$E" > erased.rc
+          cat erased.log
+      - name: Fixed-parameter real-inductive arm
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V142FixedParameterCarriage.lean > parameterized.log 2>&1
+          P=$?
+          set -e
+          E=$(cat erased.rc)
+          cat parameterized.log
+          printf '{"erased":%s,"parameterized_fixed":%s}\n' "$E" "$P" > v142_result.json
+          if [ "$E" -eq 0 ] && [ "$P" -ne 0 ]; then
+            echo 'PASS_V142_FIXED_PARAMETER_CARRIAGE_ISOLATED' > v142_verdict.txt
+          elif [ "$E" -eq 0 ] && [ "$P" -eq 0 ]; then
+            echo 'NULL_V142_FIXED_PARAMETER_CARRIAGE_SUPPORTED' > v142_verdict.txt
+          else
+            echo 'R10_V142_CONTROL_INVALID' > v142_verdict.txt
+          fi
+          cat v142_verdict.txt
+      - name: Commit attestation
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p results/v142
+          cp erased.log parameterized.log v142_result.json v142_verdict.txt results/v142/ 2>/dev/null || true
+          git rev-parse HEAD > results/v142/source_head.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add results/v142
+          git commit -m 'V142 separator result [skip ci]' || exit 0
+          git push
