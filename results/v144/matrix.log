@@ -1,0 +1,15 @@
+SpecimenTest/V144ProjectedCarriers.lean:35:0: error: (kernel) constant has already been declared 'V144Meta.Expr.rec'
+SpecimenTest/V144ProjectedCarriers.lean:38:0: warning: declaration uses `sorry`
+SpecimenTest/V144ProjectedCarriers.lean:38:0: error: (kernel) constant has already been declared 'V144Meta.HasType.rec'
+SpecimenTest/V144ProjectedCarriers.lean:46:0: error: (kernel) constant has already been declared 'V144IDDirect.Expr.rec'
+SpecimenTest/V144ProjectedCarriers.lean:49:0: warning: declaration uses `sorry`
+SpecimenTest/V144ProjectedCarriers.lean:49:0: error: (kernel) constant has already been declared 'V144IDDirect.HasType.rec'
+SpecimenTest/V144ProjectedCarriers.lean:57:0: error: (kernel) constant has already been declared 'V144TypeAnn.Expr.rec'
+SpecimenTest/V144ProjectedCarriers.lean:60:0: warning: declaration uses `sorry`
+SpecimenTest/V144ProjectedCarriers.lean:60:0: error: (kernel) constant has already been declared 'V144TypeAnn.HasType.rec'
+SpecimenTest/V144ProjectedCarriers.lean:68:0: error: (kernel) constant has already been declared 'V144IdentifierNested.Expr.rec'
+SpecimenTest/V144ProjectedCarriers.lean:71:0: warning: declaration uses `sorry`
+SpecimenTest/V144ProjectedCarriers.lean:71:0: error: (kernel) constant has already been declared 'V144IdentifierNested.HasType.rec'
+SpecimenTest/V144ProjectedCarriers.lean:79:0: error: (kernel) constant has already been declared 'V144All.Expr.rec'
+SpecimenTest/V144ProjectedCarriers.lean:85:0: warning: declaration uses `sorry`
+SpecimenTest/V144ProjectedCarriers.lean:85:0: error: (kernel) constant has already been declared 'V144All.HasType.rec'
