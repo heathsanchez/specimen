@@ -1,0 +1,53 @@
+name: V144 Strata execution ladder
+on:
+  push:
+    branches: ["v144-strata-execution-ladder"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  ladder:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact K2 plus K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen SpecimenTest
+      - name: Run frozen execution ladder
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V144ASynth.lean > synth.log 2>&1; S=$?
+          lake env lean SpecimenTest/V144BOneSample.lean > one.log 2>&1; O=$?
+          lake env lean SpecimenTest/V144C40Checked.lean > forty.log 2>&1; F=$?
+          set -e
+          cat synth.log; cat one.log; cat forty.log
+          printf '{"synth":%s,"one_sample":%s,"forty_checked":%s}\n' "$S" "$O" "$F" > v144_result.json
+          if [ "$S" -ne 0 ]; then
+            echo 'PASS_V144_FAILURE_AT_INSTANCE_SYNTHESIS' > v144_verdict.txt
+          elif [ "$O" -ne 0 ]; then
+            echo 'PASS_V144_FAILURE_AT_FIRST_EXECUTION' > v144_verdict.txt
+          elif [ "$F" -ne 0 ]; then
+            echo 'PASS_V144_FAILURE_AT_MULTI_SAMPLE_OR_CHECKER' > v144_verdict.txt
+          else
+            echo 'NULL_V144_EXECUTION_PATH_SUPPORTED' > v144_verdict.txt
+          fi
+          cat v144_verdict.txt
+      - name: Commit attestation
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p results/v144
+          cp synth.log one.log forty.log v144_result.json v144_verdict.txt results/v144/ 2>/dev/null || true
+          git rev-parse HEAD > results/v144/source_head.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add results/v144
+          git commit -m 'V144 execution-ladder result [skip ci]' || exit 0
+          git push
