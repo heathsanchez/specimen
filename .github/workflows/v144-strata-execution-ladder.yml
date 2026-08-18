@@ -19,6 +19,7 @@ jobs:
           python scripts/v120_apply_binder_aware_fixed_parameter.py
           python scripts/v132_apply_output_dependent_input_determined.py
           lake build Specimen SpecimenTest
+          lake env lean -o .lake/build/lib/lean/SpecimenTest/V143EFull.olean SpecimenTest/V143EFull.lean
       - name: Run frozen execution ladder
         shell: bash
         run: |
