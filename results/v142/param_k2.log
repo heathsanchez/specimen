@@ -1,0 +1,30 @@
+SpecimenTest/V142FixedType1Param.lean:32:0: error: Type mismatch
+  unk_1
+has type
+  V142Params
+of sort `Type 1` but is expected to have type
+  ?m.251 fuel initSize size b_1 fuel' __discr✝¹ unk_0
+of sort `Type`
+SpecimenTest/V142FixedType1Param.lean:32:0: error: Type mismatch
+  unk_1
+has type
+  V142Params
+of sort `Type 1` but is expected to have type
+  ?m.256 fuel initSize size b_1 fuel' size' __discr✝¹ unk_0
+of sort `Type`
+SpecimenTest/V142FixedType1Param.lean:32:0: error: Type mismatch
+  unk_1
+has type
+  V142Params
+of sort `Type 1` but is expected to have type
+  ?m.261 fuel initSize size b_1 fuel' size' aty rty __discr✝¹ unk_0
+of sort `Type`
+SpecimenTest/V142FixedType1Param.lean:32:0: error: Application type mismatch: The argument
+  fun unk_1 => unk_1 = V142P0
+has type
+  V142Params → Prop
+of sort `Type 1` but is expected to have type
+  ?m.261 fuel initSize size b_1 fuel' size' aty rty __discr✝ unk_0 → Prop
+of sort `Type` in the application
+  @ArbitrarySizedSuchThat.arbitrarySizedST (?m.261 fuel initSize size b_1 fuel' size' aty rty __discr✝ unk_0)
+    fun unk_1 => unk_1 = V142P0
