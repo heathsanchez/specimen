@@ -1,0 +1,63 @@
+name: V143 real Strata rule bisect
+on:
+  push:
+    branches: ["v143-real-strata-rule-bisect"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bisect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply exact K2 plus K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen SpecimenTest
+      - name: Run frozen arms
+        shell: bash
+        run: |
+          set +e
+          for arm in AContextAbs BLookup CApp DQuant EFull; do
+            lake env lean "SpecimenTest/V143${arm}.lean" > "${arm}.log" 2>&1
+            rc=$?
+            echo "$rc" > "${arm}.rc"
+            echo "${arm}=$rc"
+            cat "${arm}.log"
+          done
+          set -e
+          A=$(cat AContextAbs.rc); B=$(cat BLookup.rc); C=$(cat CApp.rc); D=$(cat DQuant.rc); E=$(cat EFull.rc)
+          printf '{"context_abs":%s,"lookup":%s,"app":%s,"quant":%s,"full":%s}\n' "$A" "$B" "$C" "$D" "$E" > v143_result.json
+          if [ "$A" -ne 0 ]; then
+            echo 'R10_V143_BASE_CONTROL_FAILED' > v143_verdict.txt
+          elif [ "$B" -ne 0 ]; then
+            echo 'PASS_V143_FIRST_FAIL_LOOKUP' > v143_verdict.txt
+          elif [ "$C" -ne 0 ]; then
+            echo 'PASS_V143_FIRST_FAIL_APP' > v143_verdict.txt
+          elif [ "$D" -ne 0 ]; then
+            echo 'PASS_V143_FIRST_FAIL_QUANT' > v143_verdict.txt
+          elif [ "$E" -ne 0 ]; then
+            echo 'PASS_V143_INTERACTION_ONLY_FULL_FAIL' > v143_verdict.txt
+          else
+            echo 'NULL_V143_ALL_RULE_FAMILIES_SUPPORTED' > v143_verdict.txt
+          fi
+          cat v143_verdict.txt
+      - name: Commit attestation
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p results/v143
+          cp *.log *.rc v143_result.json v143_verdict.txt results/v143/ 2>/dev/null || true
+          git rev-parse HEAD > results/v143/source_head.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add results/v143
+          git commit -m 'V143 rule-bisect result [skip ci]' || exit 0
+          git push
