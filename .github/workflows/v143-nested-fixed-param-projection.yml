@@ -1,0 +1,70 @@
+name: V143 nested fixed-param projection
+on:
+  push:
+    branches: ["v143-nested-fixed-param-projection"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply K2 plus K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen SpecimenTest
+      - name: Direct versus nested fixed parameter
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V143DirectControl.lean > direct.log 2>&1
+          DIRECT=$?
+          lake env lean SpecimenTest/V143NestedProjection.lean > nested.log 2>&1
+          NESTED=$?
+          set -e
+          cat direct.log
+          cat nested.log
+          printf '{"direct":%s,"nested":%s}\n' "$DIRECT" "$NESTED" > v143_result.json
+          if [ "$DIRECT" -ne 0 ]; then
+            echo 'R10_V143_DIRECT_CONTROL_FAILED' | tee v143_verdict.txt
+          elif [ "$NESTED" -eq 0 ]; then
+            echo 'NULL_V143_NESTED_PROJECTION_ALREADY_SUPPORTED' | tee v143_verdict.txt
+          elif grep -qE 'Type 1|V143ParamsT|V143Base|ArbitrarySizedSuchThat.*V143Expr|failed to synthesize instance' nested.log; then
+            echo 'QUALIFIED_V143_NESTED_FIXED_PROJECTION_FRONTIER' | tee v143_verdict.txt
+          else
+            echo 'R10_V143_UNRELATED_NESTED_FAILURE' | tee v143_verdict.txt
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v143-nested-fixed-param-projection
+          path: |
+            direct.log
+            nested.log
+            v143_result.json
+            v143_verdict.txt
+      - name: Persist result to branch
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p /tmp/v143persist
+          cp direct.log nested.log v143_result.json v143_verdict.txt /tmp/v143persist/ 2>/dev/null || true
+          git reset --hard "$GITHUB_SHA"
+          mkdir -p results/v143
+          cp /tmp/v143persist/* results/v143/ 2>/dev/null || true
+          printf '%s\n' "$GITHUB_SHA" > results/v143/source_head.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add results/v143
+          if ! git diff --cached --quiet; then
+            git commit -m 'V143 separator result [skip ci]'
+            git push origin HEAD:v143-nested-fixed-param-projection
+          fi
