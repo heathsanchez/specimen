@@ -1,1 +1,1 @@
-SpecimenTest/V144ASynth.lean:1:0: error: object file '/home/runner/work/specimen/specimen/.lake/build/lib/lean/SpecimenTest/V143EFull.olean' of module SpecimenTest.V143EFull does not exist
+instArbitrarySizedSuchThatV143EExprV143EHasType
