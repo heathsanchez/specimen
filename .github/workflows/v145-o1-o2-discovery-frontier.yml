@@ -1,0 +1,112 @@
+name: V145 O1 to O2 discovery-frontier fast pass
+on:
+  push:
+    branches: ["v145-o1-o2-discovery-frontier"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  discover:
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [D, D_O1]
+        seed: [14501, 14502, 14503, 14504]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Warm pristine build
+        run: lake build Specimen SpecimenTest
+      - name: Run frozen matched discovery controller
+        run: |
+          mkdir -p out
+          python scripts/v145_discovery_controller.py --arm '${{ matrix.arm }}' --seed '${{ matrix.seed }}' --out 'out/${{ matrix.arm }}_${{ matrix.seed }}.json'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v145-${{ matrix.arm }}-${{ matrix.seed }}
+          path: |
+            out/*.json
+            attempt_*_*.log
+
+  aggregate:
+    needs: discover
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: v145-*
+          path: downloaded
+          merge-multiple: true
+      - name: Aggregate frozen decision and ancestor ablation
+        shell: bash
+        run: |
+          set -e
+          mkdir -p results/v145
+          cp downloaded/*.json results/v145/
+          python - <<'PY'
+          import json, glob, statistics, pathlib
+          rs=[json.load(open(p)) for p in glob.glob('downloaded/*.json')]
+          A=[r for r in rs if r['arm']=='D']
+          B=[r for r in rs if r['arm']=='D_O1']
+          summary={
+            'A_o2':sum(r['discovered_o2'] for r in A),
+            'B_o2':sum(r['discovered_o2'] for r in B),
+            'A_any':sum(r['first_qualified'] is not None for r in A),
+            'B_any':sum(r['first_qualified'] is not None for r in B),
+            'A_evals':[r['evaluated'] for r in A],
+            'B_evals':[r['evaluated'] for r in B],
+          }
+          pathlib.Path('results/v145/pre_ablation_summary.json').write_text(json.dumps(summary,indent=2,sort_keys=True)+'\n')
+          pathlib.Path('need_ablation').write_text('1' if summary['B_o2']>=1 else '0')
+          print(summary)
+          PY
+          echo 999 > results/v145/ancestor_ablation.rc
+          if [ "$(cat need_ablation)" = 1 ]; then
+            python scripts/v145_apply_candidate.py both
+            lake build Specimen > results/v145/ancestor_ablation_build.log 2>&1 || true
+            set +e
+            lake env lean SpecimenTest/V145O1O2Target.lean > results/v145/ancestor_ablation_target.log 2>&1
+            ABL=$?
+            if [ "$ABL" -eq 0 ]; then
+              lake build SpecimenTest > results/v145/ancestor_ablation_protected.log 2>&1
+              P=$?
+              if [ "$P" -ne 0 ]; then ABL=$P; fi
+            fi
+            set -e
+            echo "$ABL" > results/v145/ancestor_ablation.rc
+          fi
+          python - <<'PY'
+          import json, pathlib, statistics
+          s=json.load(open('results/v145/pre_ablation_summary.json'))
+          abl=int(pathlib.Path('results/v145/ancestor_ablation.rc').read_text().strip())
+          s['ancestor_ablation_rc']=abl
+          if s['B_o2']>=3 and s['A_o2']<=1:
+            verdict='PASS_V145_FAST_FRONTIER_EXPANSION' if abl!=0 else 'FAIL_V145_ANCESTOR_ABLATION'
+          elif s['A_o2']>=3:
+            verdict='NULL_V145_O2_ALREADY_REACHABLE'
+          else:
+            verdict='NULL_V145_O1_NO_DISCOVERY_EFFECT'
+          s['verdict']=verdict
+          pathlib.Path('results/v145/v145_summary.json').write_text(json.dumps(s,indent=2,sort_keys=True)+'\n')
+          pathlib.Path('results/v145/v145_verdict.txt').write_text(verdict+'\n')
+          print(json.dumps(s,sort_keys=True))
+          print(verdict)
+          PY
+      - name: Commit immutable attestation
+        if: always()
+        run: |
+          git rev-parse HEAD > results/v145/source_head.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add results/v145
+          git commit -m 'V145 discovery-frontier result [skip ci]' || exit 0
+          git push
