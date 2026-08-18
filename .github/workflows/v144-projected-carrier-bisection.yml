@@ -1,0 +1,64 @@
+name: V144 projected carrier bisection
+on:
+  push:
+    branches: ["v144-projected-carrier-bisection"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply K2 plus K5
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen SpecimenTest
+      - name: Run projected carrier matrix
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V144ProjectedCarriers.lean > matrix.log 2>&1
+          RC=$?
+          set -e
+          cat matrix.log
+          printf '{"matrix":%s}\n' "$RC" > v144_result.json
+          if [ "$RC" -eq 0 ]; then
+            echo 'NULL_V144_PROJECTED_CARRIERS_ALREADY_SUPPORTED' | tee v144_verdict.txt
+          elif grep -qE 'V144IDDirect|V144TypeAnn|V144IdentifierNested|V144All|failed to synthesize instance|Type mismatch' matrix.log; then
+            echo 'QUALIFIED_V144_PROJECTED_CARRIER_FRONTIER' | tee v144_verdict.txt
+          else
+            echo 'R10_V144_UNRELATED_FAILURE' | tee v144_verdict.txt
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v144-projected-carrier-bisection
+          path: |
+            matrix.log
+            v144_result.json
+            v144_verdict.txt
+      - name: Persist result to branch
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p /tmp/v144persist
+          cp matrix.log v144_result.json v144_verdict.txt /tmp/v144persist/ 2>/dev/null || true
+          git reset --hard "$GITHUB_SHA"
+          mkdir -p results/v144
+          cp /tmp/v144persist/* results/v144/ 2>/dev/null || true
+          printf '%s\n' "$GITHUB_SHA" > results/v144/source_head.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add results/v144
+          if ! git diff --cached --quiet; then
+            git commit -m 'V144 separator result [skip ci]'
+            git push origin HEAD:v144-projected-carrier-bisection
+          fi
