@@ -1,10 +1,23 @@
 import SpecimenTest.StrataDefs.LambdaCore
 import Specimen.DeriveConstrainedProducer
+import Plausible.Arbitrary
 
 open Lambda
+open Plausible
 
 set_option specimen.autoDeriveDeps true
 set_option specimen.multiOutput true
+
+/- Apparatus-only prerequisite copied exactly in spirit from the historical
+   Strata harness: the recursive-pair separator needs occasional unconstrained
+   LMonoTy values before it can reach the intended constrained dependency. -/
+instance : Arbitrary LMonoTy where
+  arbitrary := do
+    let choices : List LMonoTy :=
+      [.int, .bool, .string,
+       .arrow .int .bool, .arrow .bool .bool, .arrow .int .int]
+    let n ← Plausible.Gen.chooseNatLt 0 choices.length (by decide)
+    return choices[n.val]!
 
 inductive V141Expr : Type where
   | lit (n : Nat)
