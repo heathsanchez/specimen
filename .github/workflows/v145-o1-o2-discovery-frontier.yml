@@ -45,21 +45,36 @@ jobs:
         with:
           pattern: v145-*
           path: downloaded
-          merge-multiple: true
+          merge-multiple: false
       - name: Aggregate frozen decision and ancestor ablation
         shell: bash
         run: |
           set -e
-          mkdir -p results/v145
-          cp downloaded/*.json results/v145/
+          mkdir -p results/v145/arms
+          find downloaded -type f -name '*.json' -print | sort > results/v145/artifact_json_paths.txt
+          COUNT=$(wc -l < results/v145/artifact_json_paths.txt | tr -d ' ')
+          echo "$COUNT" > results/v145/artifact_json_count.txt
+          if [ "$COUNT" -ne 8 ]; then
+            echo 'R10_V145_ARTIFACT_COUNT' > results/v145/v145_verdict.txt
+            printf '{"artifact_json_count":%s,"verdict":"R10_V145_ARTIFACT_COUNT"}\n' "$COUNT" > results/v145/v145_summary.json
+            exit 0
+          fi
+          while IFS= read -r p; do cp "$p" results/v145/arms/; done < results/v145/artifact_json_paths.txt
           python - <<'PY'
-          import json, glob, statistics, pathlib
-          rs=[json.load(open(p)) for p in glob.glob('downloaded/*.json')]
+          import json, glob, pathlib
+          rs=[json.load(open(p)) for p in glob.glob('results/v145/arms/*.json')]
+          keys=sorted((r.get('arm'),r.get('seed')) for r in rs)
+          expected=sorted((a,s) for a in ['D','D_O1'] for s in [14501,14502,14503,14504])
+          if keys != expected:
+              pathlib.Path('results/v145/v145_summary.json').write_text(json.dumps({'keys':keys,'expected':expected,'verdict':'R10_V145_ARM_SEED_IDENTITY'},indent=2)+'\n')
+              pathlib.Path('results/v145/v145_verdict.txt').write_text('R10_V145_ARM_SEED_IDENTITY\n')
+              pathlib.Path('need_ablation').write_text('0')
+              raise SystemExit(0)
           A=[r for r in rs if r['arm']=='D']
           B=[r for r in rs if r['arm']=='D_O1']
           summary={
-            'A_o2':sum(r['discovered_o2'] for r in A),
-            'B_o2':sum(r['discovered_o2'] for r in B),
+            'A_o2':sum(bool(r['discovered_o2']) for r in A),
+            'B_o2':sum(bool(r['discovered_o2']) for r in B),
             'A_any':sum(r['first_qualified'] is not None for r in A),
             'B_any':sum(r['first_qualified'] is not None for r in B),
             'A_evals':[r['evaluated'] for r in A],
@@ -69,6 +84,7 @@ jobs:
           pathlib.Path('need_ablation').write_text('1' if summary['B_o2']>=1 else '0')
           print(summary)
           PY
+          if [ -f results/v145/v145_verdict.txt ]; then exit 0; fi
           echo 999 > results/v145/ancestor_ablation.rc
           if [ "$(cat need_ablation)" = 1 ]; then
             python scripts/v145_apply_candidate.py both
@@ -85,7 +101,7 @@ jobs:
             echo "$ABL" > results/v145/ancestor_ablation.rc
           fi
           python - <<'PY'
-          import json, pathlib, statistics
+          import json, pathlib
           s=json.load(open('results/v145/pre_ablation_summary.json'))
           abl=int(pathlib.Path('results/v145/ancestor_ablation.rc').read_text().strip())
           s['ancestor_ablation_rc']=abl
@@ -104,9 +120,10 @@ jobs:
       - name: Commit immutable attestation
         if: always()
         run: |
+          mkdir -p results/v145
           git rev-parse HEAD > results/v145/source_head.txt
           git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config user.email '41898282+heathsanchez@users.noreply.github.com'
           git add results/v145
           git commit -m 'V145 discovery-frontier result [skip ci]' || exit 0
           git push
