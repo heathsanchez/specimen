@@ -4,6 +4,9 @@ on:
     branches: ["v141-recursive-pair-frontier"]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   separator:
     runs-on: ubuntu-latest
@@ -42,13 +45,13 @@ jobs:
           printf '{"k2":%s,"k2_k5":%s}\n' "$A" "$B" > v141_result.json
           echo "A=$A B=$B"
           if [ "$A" -ne 0 ] && [ "$B" -eq 0 ]; then
-            echo 'PASS_V141_K5_UNLOCKS_RECURSIVE_DEPENDENT_PAIR'
+            echo 'PASS_V141_K5_UNLOCKS_RECURSIVE_DEPENDENT_PAIR' | tee v141_verdict.txt
           elif [ "$A" -eq 0 ] && [ "$B" -eq 0 ]; then
-            echo 'NULL_V141_CORE_ALREADY_SUPPORTED'
+            echo 'NULL_V141_CORE_ALREADY_SUPPORTED' | tee v141_verdict.txt
           elif [ "$A" -ne 0 ] && [ "$B" -ne 0 ]; then
-            echo 'QUALIFIED_V141_CORE_RECURSIVE_PAIR_RESIDUAL'
+            echo 'QUALIFIED_V141_CORE_RECURSIVE_PAIR_RESIDUAL' | tee v141_verdict.txt
           else
-            echo 'R10_V141_UNEXPECTED_PATTERN'
+            echo 'R10_V141_UNEXPECTED_PATTERN' | tee v141_verdict.txt
           fi
       - uses: actions/upload-artifact@v4
         if: always()
@@ -58,3 +61,21 @@ jobs:
             arm_a.log
             arm_b.log
             v141_result.json
+            v141_verdict.txt
+      - name: Persist result to branch
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p /tmp/v141persist
+          cp arm_a.log arm_b.log v141_result.json v141_verdict.txt /tmp/v141persist/ 2>/dev/null || true
+          git reset --hard "$GITHUB_SHA"
+          mkdir -p results/v141
+          cp /tmp/v141persist/* results/v141/ 2>/dev/null || true
+          printf '%s\n' "$GITHUB_SHA" > results/v141/source_head.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add results/v141
+          if ! git diff --cached --quiet; then
+            git commit -m 'V141C separator result [skip ci]'
+            git push origin HEAD:v141-recursive-pair-frontier
+          fi
