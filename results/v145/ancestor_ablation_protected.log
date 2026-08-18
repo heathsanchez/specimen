@@ -1,0 +1,212 @@
+✔ [1/17] Built SpecimenTest.CommonDefinitions.FunctionCallInConclusion (333ms)
+✔ [2/17] Built SpecimenTest.CommonDefinitions.ListRelations (385ms)
+✔ [9/119] Built SpecimenTest.CommonDefinitions.BinaryTree (408ms)
+✔ [46/119] Built SpecimenTest.CommonDefinitions.Permutation (457ms)
+✔ [47/120] Built Plausible.Attr (635ms)
+✔ [48/120] Built Plausible.Shrinkable (609ms)
+✔ [50/120] Built SpecimenTest.DeriveArbitrary.StructureParameterTest (2.0s)
+✔ [51/120] Built SpecimenTest.Enum.EnumInstancesTest (1.8s)
+✔ [52/121] Built SpecimenTest.DeriveEnum.NestedAndMutualRecursionTest (1.8s)
+✔ [53/121] Built SpecimenTest.DeriveEnum.StructureParameterTest (2.2s)
+✔ [54/121] Built SpecimenTest.DeriveEnum.MissingNonRecursiveConstructorTest (1.3s)
+✔ [55/121] Built SpecimenTest.DeriveEnum.DeriveTreeEnumerator (1.3s)
+✔ [56/121] Built SpecimenTest.DeriveArbitrary.MissingNonRecursiveConstructorTest (1.2s)
+ℹ [57/121] Built SpecimenTest.DeriveEnumSuchThat.DerivePermutationEnumerator (1.8s)
+info: SpecimenTest/DeriveEnumSuchThat/DerivePermutationEnumerator.lean:10:0: derive_mutual: 2 specs in 2 components
+info: SpecimenTest/DeriveEnumSuchThat/DerivePermutationEnumerator.lean:10:0: ● [enumerator] fun a => ∃ b, Permutation a b (2 base, 2 rec)
+info: SpecimenTest/DeriveEnumSuchThat/DerivePermutationEnumerator.lean:10:0: ● [enumerator] ∃ a b, Permutation a b (2 base, 2 rec)
+ℹ [58/121] Built SpecimenTest.DeriveArbitrarySuchThat.UserInstancePriorityTest (1.6s)
+info: SpecimenTest/DeriveArbitrarySuchThat/UserInstancePriorityTest.lean:33:0: derive_mutual: 2 specs in 2 components
+info: SpecimenTest/DeriveArbitrarySuchThat/UserInstancePriorityTest.lean:33:0: ● [generator] ∃ a, HasSum10 a (1 base, 0 rec)
+✔ [59/121] Built SpecimenTest.DeriveArbitrarySuchThat.NonLinearPatternsTest (1.6s)
+ℹ [60/121] Built SpecimenTest.DeriveArbitrarySuchThat.MultiOutputTest (1.7s)
+info: SpecimenTest/DeriveArbitrarySuchThat/MultiOutputTest.lean:32:0: [plausible.deriving.results] First Schedule: do
+        [unk_0] ← unk_0 = (ofNat Nat 0 (instOfNatNat 0))
+        [unk_1] ← unk_1 = (ofNat Nat 0 (instOfNatNat 0))
+        [unk_2] ← unk_2 = (ofNat Nat 0 (instOfNatNat 0)) 
+    Score: { checks := 0, length := 3, unconstrained := 0 }
+    Schedules Considered: 1
+    Schedules Processed: 1
+[plausible.deriving.results] Chosen Schedule: do
+        [unk_0] ← unk_0 = (ofNat Nat 0 (instOfNatNat 0))
+        [unk_1] ← unk_1 = (ofNat Nat 0 (instOfNatNat 0))
+        [unk_2] ← unk_2 = (ofNat Nat 0 (instOfNatNat 0)) 
+    Score: { checks := 0, length := 3, unconstrained := 0 }
+    Schedules Processed: 1
+[plausible.deriving.results]   Search time: 2ms
+[plausible.deriving.results]   Unify time: 0ms
+[plausible.deriving.results] First Schedule: do
+        [unk_0] ← unk_0 = (ofNat Nat 1 (instOfNatNat 1))
+        n ← Nat 
+    Score: { checks := 0, length := 2, unconstrained := 1 }
+    Schedules Considered: 1
+    Schedules Processed: 1
+[plausible.deriving.results] Chosen Schedule: do
+        [unk_0] ← unk_0 = (ofNat Nat 1 (instOfNatNat 1))
+        n ← Nat 
+    Score: { checks := 0, length := 2, unconstrained := 1 }
+    Schedules Processed: 1
+[plausible.deriving.results]   Search time: 0ms
+[plausible.deriving.results]   Unify time: 0ms
+[plausible.deriving.results] First Schedule: do
+        [unk_0] ← unk_0 = (ofNat Nat 1 (instOfNatNat 1))
+        n ← Nat 
+    Score: { checks := 0, length := 2, unconstrained := 1 }
+    Schedules Considered: 1
+    Schedules Processed: 1
+[plausible.deriving.results] Chosen Schedule: do
+        [unk_0] ← unk_0 = (ofNat Nat 1 (instOfNatNat 1))
+        n ← Nat 
+    Score: { checks := 0, length := 2, unconstrained := 1 }
+    Schedules Processed: 1
+[plausible.deriving.results]   Search time: 0ms
+[plausible.deriving.results]   Unify time: 0ms
+✔ [61/121] Built SpecimenTest.DeriveArbitrarySuchThat.InstanceParameterTest (1.5s)
+✔ [62/121] Built SpecimenTest.DeriveArbitrarySuchThat.DependentOutputTypeTest (1.5s)
+✔ [63/121] Built SpecimenTest.DeriveArbitrarySuchThat.Syntax (1.5s)
+✔ [64/121] Built SpecimenTest.DeriveArbitrarySuchThat.WithUnfolds (1.7s)
+✔ [65/121] Built SpecimenTest.DeriveArbitrarySuchThat.MutuallyRecursiveRelationsTest (1.5s)
+ℹ [66/121] Built SpecimenTest.DeriveArbitrarySuchThat.DerivePermutationGenerator (1.0s)
+info: SpecimenTest/DeriveArbitrarySuchThat/DerivePermutationGenerator.lean:10:0: derive_mutual: 2 specs in 2 components
+info: SpecimenTest/DeriveArbitrarySuchThat/DerivePermutationGenerator.lean:10:0: ● [generator] fun a => ∃ b, Permutation a b (2 base, 2 rec)
+info: SpecimenTest/DeriveArbitrarySuchThat/DerivePermutationGenerator.lean:10:0: ● [generator] ∃ a b, Permutation a b (2 base, 2 rec)
+✔ [67/121] Built SpecimenTest.DeriveArbitrarySuchThat.DelegatedProducerTest (1.8s)
+✔ [69/121] Built SpecimenTest.DeriveArbitrarySuchThat.DelegatedProducerRepeatedVarTest (2.2s)
+✔ [70/121] Built SpecimenTest.DeriveArbitrarySuchThat.GetElemPremiseTest (1.6s)
+✔ [71/122] Built Plausible.Sampleable (913ms)
+✔ [72/122] Built SpecimenTest.DeriveArbitrarySuchThat.FunctionCallsTest (1.6s)
+✔ [73/122] Built SpecimenTest.DeriveArbitrarySuchThat.DeriveBalancedTreeGenerator (1.5s)
+✔ [74/122] Built Batteries.Tactic.Lint.Basic (1.3s)
+✔ [75/122] Built SpecimenTest.DeriveArbitrarySuchThat.EqMultiOutputTest (1.3s)
+✔ [76/122] Built SpecimenTest.Enum.EnumeratorSizeTest (1.5s)
+✔ [77/122] Built SpecimenTest.DeriveArbitrarySuchThat.DependentArgs (1.7s)
+✔ [79/122] Built SpecimenTest.DeriveDecOpt.FunctionCallsTest (1.5s)
+ℹ [80/122] Built SpecimenTest.DeriveDecOpt.DerivePermutationChecker (1.7s)
+info: SpecimenTest/DeriveDecOpt/DerivePermutationChecker.lean:11:0: derive_mutual: 3 specs in 3 components
+info: SpecimenTest/DeriveDecOpt/DerivePermutationChecker.lean:11:0: ● [checker] fun a b => Permutation a b (2 base, 2 rec)
+✔ [81/124] Built SpecimenTest.DeriveArbitrarySuchThat.NEqGenerator (3.5s)
+✔ [82/124] Built SpecimenTest.KeyValueStoreExample.KeyValueStore (2.7s)
+⚠ [83/124] Built SpecimenTest.DeriveDecOpt.DeriveBSTChecker (1.7s)
+info: SpecimenTest/DeriveDecOpt/DeriveBSTChecker.lean:17:0: derive_mutual: 4 specs in 4 components
+warning: SpecimenTest/DeriveDecOpt/DeriveBSTChecker.lean:17:0: No schedule found for LE.le[]
+info: SpecimenTest/DeriveDecOpt/DeriveBSTChecker.lean:17:0: ● [checker] fun a b c => Between a b c (1 base, 1 rec)
+info: SpecimenTest/DeriveDecOpt/DeriveBSTChecker.lean:17:0: ● [checker] fun a b c => BST a b c (1 base, 1 rec)
+✔ [84/124] Built Batteries.Tactic.OpenPrivate (1.7s)
+ℹ [85/125] Built SpecimenTest.DeriveEnumSuchThat.DeriveBalancedTreeEnumerator (1.5s)
+info: SpecimenTest/DeriveEnumSuchThat/DeriveBalancedTreeEnumerator.lean:15:0: derive_mutual: 1 specs in 1 components
+info: SpecimenTest/DeriveEnumSuchThat/DeriveBalancedTreeEnumerator.lean:15:0: ● [enumerator] fun a => ∃ b, balancedTree a b (2 base, 1 rec)
+✔ [86/133] Built Plausible.Testable (2.9s)
+✔ [87/133] Built Batteries.Tactic.Lint.Misc (1.6s)
+✔ [88/133] Built Batteries.Util.LibraryNote (1.1s)
+✔ [89/133] Built SpecimenTest.DeriveArbitrarySuchThat.MissingNonRecursiveConstructorTest (1.7s)
+✔ [90/133] Built SpecimenTest.DeriveDecOpt.SimultaneousMatchingTests (1.5s)
+ℹ [92/138] Built SpecimenTest.DeriveDecOpt.DeriveBalancedTreeChecker (1.5s)
+info: SpecimenTest/DeriveDecOpt/DeriveBalancedTreeChecker.lean:15:0: derive_mutual: 1 specs in 1 components
+info: SpecimenTest/DeriveDecOpt/DeriveBalancedTreeChecker.lean:15:0: ● [checker] fun a b => balancedTree a b (2 base, 1 rec)
+✔ [93/138] Built SpecimenTest.DeriveDecOpt.NonLinearPatternsTest (1.4s)
+✔ [94/138] Built Batteries.Tactic.Lint.TypeClass (780ms)
+⚠ [95/138] Built SpecimenTest.DeriveArbitrarySuchThat.DeriveBSTGenerator (1.9s)
+warning: SpecimenTest/DeriveArbitrarySuchThat/DeriveBSTGenerator.lean:23:0: No schedule found for LE.le[]
+✔ [96/138] Built SpecimenTest.DeriveArbitrary.DeriveSTLCTermTypeGenerators (2.0s)
+✔ [97/138] Built SpecimenTest.DeriveArbitrary.DeriveRegExpGenerator (1.8s)
+✔ [98/138] Built SpecimenTest.DeriveArbitrary.DeriveTreeGenerator (1.6s)
+✔ [99/138] Built SpecimenTest.DeriveArbitrary.DeriveNKIValueGenerator (1.8s)
+✔ [100/138] Built SpecimenTest.DeriveArbitrary.DeriveNKIBinopGenerator (1.8s)
+✔ [101/138] Built SpecimenTest.KeyValueStoreExample.TestKeyValueStoreCheckerGenerators (6.2s)
+✔ [102/138] Built SpecimenTest.DeriveArbitrary.StructureTest (1.7s)
+✔ [103/138] Built SpecimenTest.DeriveArbitrary.BitVecStructureTest (1.6s)
+✔ [104/138] Built SpecimenTest.DeriveArbitrary.ParameterizedTypeTest (1.7s)
+✔ [105/138] Built SpecimenTest.DeriveArbitrary.MutuallyRecursiveTypeTest (1.7s)
+✔ [106/138] Built Batteries.Tactic.Lint.Frontend (2.6s)
+✔ [107/138] Built Batteries.Tactic.Lint.Simp (1.9s)
+✔ [108/138] Built SpecimenTest.ArithCompiler.FancyCompilerBuggy (2.0s)
+✔ [109/138] Built SpecimenTest.DeriveEnumSuchThat.SimultaneousMatchingTests (1.8s)
+✔ [110/138] Built SpecimenTest.DeriveArbitrarySuchThat.SimultaneousMatchingTests (2.1s)
+✔ [111/138] Built SpecimenTest.StrataDefs.LambdaCore (5.1s)
+✔ [112/138] Built SpecimenTest.CommonDefinitions.STLCDefinitions (1.5s)
+⚠ [113/138] Built SpecimenTest.DeriveEnumSuchThat.DeriveBSTEnumerator (1.8s)
+info: SpecimenTest/DeriveEnumSuchThat/DeriveBSTEnumerator.lean:14:0: derive_mutual: 3 specs in 3 components
+warning: SpecimenTest/DeriveEnumSuchThat/DeriveBSTEnumerator.lean:14:0: No schedule found for LE.le[]
+info: SpecimenTest/DeriveEnumSuchThat/DeriveBSTEnumerator.lean:14:0: ● [enumerator] fun a c => ∃ b, Between a b c (1 base, 1 rec)
+info: SpecimenTest/DeriveEnumSuchThat/DeriveBSTEnumerator.lean:14:0: ● [enumerator] fun a b => ∃ c, BST a b c (1 base, 1 rec)
+✔ [114/138] Built Plausible.DeriveShrinkable (2.8s)
+✔ [115/138] Built SpecimenTest.DeriveEnum.DeriveRegExpEnumerator (1.4s)
+ℹ [116/138] Built SpecimenTest.DeriveArbitrarySuchThat.DeriveRegExpMatchGenerator (2.1s)
+info: SpecimenTest/DeriveArbitrarySuchThat/DeriveRegExpMatchGenerator.lean:67:0: derive_mutual: 2 specs in 2 components
+info: SpecimenTest/DeriveArbitrarySuchThat/DeriveRegExpMatchGenerator.lean:67:0: ● [generator] fun b => ∃ a, ExpMatch a b (3 base, 4 rec)
+✔ [117/138] Built SpecimenTest.DeriveEnum.DeriveNKIValueEnumerator (1.5s)
+✔ [118/138] Built SpecimenTest.DeriveEnum.DeriveNKIBinopEnumerator (1.5s)
+✔ [119/138] Built Batteries.Tactic.Lint (563ms)
+✔ [120/138] Built SpecimenTest.DeriveEnum.StructureTest (1.4s)
+✔ [121/138] Built SpecimenTest.DeriveEnum.BitVecStructureTest (1.5s)
+✔ [122/138] Built SpecimenTest.DeriveDecOpt.ExistentialVariablesTest (1.8s)
+✔ [123/138] Built SpecimenTest.DeriveEnum.DeriveSTLCTermTypeEnumerators (1.6s)
+✔ [124/138] Built SpecimenTest.DeriveEnumSuchThat.NonLinearPatternsTest (1.6s)
+✔ [125/138] Built SpecimenTest.ArithCompiler.FancyCompilerBuggyTest (2.3s)
+ℹ [126/138] Built SpecimenTest.DeriveEnumSuchThat.DeriveRegExpMatchEnumerator (1.9s)
+info: SpecimenTest/DeriveEnumSuchThat/DeriveRegExpMatchEnumerator.lean:15:0: derive_mutual: 2 specs in 2 components
+info: SpecimenTest/DeriveEnumSuchThat/DeriveRegExpMatchEnumerator.lean:15:0: ● [enumerator] fun a c => ∃ b, Eq a b c (1 base, 0 rec)
+info: SpecimenTest/DeriveEnumSuchThat/DeriveRegExpMatchEnumerator.lean:15:0: ● [enumerator] fun b => ∃ a, ExpMatch a b (3 base, 4 rec)
+✔ [127/138] Built SpecimenTest.StrataLexprGen (4.3s)
+ℹ [128/138] Built SpecimenTest.DeriveDecOpt.DeriveRegExpMatchChecker (1.6s)
+info: SpecimenTest/DeriveDecOpt/DeriveRegExpMatchChecker.lean:24:0: derive_mutual: 3 specs in 3 components
+info: SpecimenTest/DeriveDecOpt/DeriveRegExpMatchChecker.lean:24:0: ● [checker] fun a b => ExpMatch a b (3 base, 4 rec)
+ℹ [129/138] Built SpecimenTest.DeriveEnumSuchThat.DeriveSTLCEnumerator (2.4s)
+info: SpecimenTest/DeriveEnumSuchThat/DeriveSTLCEnumerator.lean:15:0: derive_mutual: 5 specs in 4 components
+info: SpecimenTest/DeriveEnumSuchThat/DeriveSTLCEnumerator.lean:15:0: ● [enumerator] fun a c => ∃ b, lookup a b c (1 base, 1 rec)
+info: SpecimenTest/DeriveEnumSuchThat/DeriveSTLCEnumerator.lean:15:0: ● [enumerator] fun a => ∃ b c, lookup a b c (1 base, 1 rec)
+info: SpecimenTest/DeriveEnumSuchThat/DeriveSTLCEnumerator.lean:15:0: ◆ mutual (2):
+    [enumerator] fun a c => ∃ b, typing a b c (2 base, 3 rec)
+    [enumerator] fun a => ∃ b c, typing a b c (2 base, 3 rec)
+✔ [130/138] Built SpecimenTest.CedarExample.Cedar (3.9s)
+ℹ [131/138] Built SpecimenTest.DeriveDecOpt.DeriveSTLCChecker (968ms)
+info: SpecimenTest/DeriveDecOpt/DeriveSTLCChecker.lean:17:0: derive_mutual: 1 specs in 1 components
+ℹ [132/138] Built SpecimenTest.DeriveArbitrarySuchThat.DeriveSTLCGenerator (1.8s)
+info: SpecimenTest/DeriveArbitrarySuchThat/DeriveSTLCGenerator.lean:19:0: derive_mutual: 5 specs in 4 components
+info: SpecimenTest/DeriveArbitrarySuchThat/DeriveSTLCGenerator.lean:19:0: ● [generator] fun a => ∃ b c, lookup a b c (1 base, 1 rec)
+info: SpecimenTest/DeriveArbitrarySuchThat/DeriveSTLCGenerator.lean:19:0: ● [generator] fun a c => ∃ b, lookup a b c (1 base, 1 rec)
+info: SpecimenTest/DeriveArbitrarySuchThat/DeriveSTLCGenerator.lean:19:0: ◆ mutual (2):
+    [generator] fun a => ∃ b c, typing a b c (2 base, 3 rec)
+    [generator] fun a c => ∃ b, typing a b c (2 base, 3 rec)
+✔ [133/138] Built SpecimenTest.DeriveArbitrarySuchThat.MultiOutputSTLCTest (1.9s)
+ℹ [134/138] Built SpecimenTest.ScheduleQualityRegressionTest (5.3s)
+info: SpecimenTest/ScheduleQualityRegressionTest.lean:33:0: inferInstance : ArbitrarySizedSuchThat Nat fun x => Between 0 x 10
+info: SpecimenTest/ScheduleQualityRegressionTest.lean:34:0: inferInstance : ArbitrarySizedSuchThat BinaryTree fun t => BST 0 10 t
+info: SpecimenTest/ScheduleQualityRegressionTest.lean:35:0: inferInstance : ArbitrarySizedSuchThat term fun e => typing [] e type.Nat
+info: SpecimenTest/ScheduleQualityRegressionTest.lean:36:0: inferInstance : ArbitrarySizedSuchThat (List Nat) fun s => ExpMatch s (RegExp.Char 1)
+ℹ [135/138] Built SpecimenTest.CedarExample.CedarCheckerGenerators (16s)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: derive_mutual: 32 specs in 31 components
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [checker] fun a b => Cedar.DefinedName a b (1 base, 1 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [checker] fun a b => Cedar.WfCedarType a b (5 base, 3 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] fun a => ∃ b, Cedar.DefinedEntities a b (1 base, 1 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] fun a => ∃ b, Cedar.ReqContextToCedarType a b (1 base, 1 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] fun a => ∃ b c, Cedar.HasTypeVar a b c (4 base, 0 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [checker] fun a => Cedar.RecordType a (2 base, 0 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [checker] fun a b => Cedar.DefinedEntity a b (1 base, 1 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] fun a c => ∃ b, Cedar.HasTypePrim a b c (5 base, 0 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] ∃ a, Cedar.RecordType a (2 base, 0 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] fun a => ∃ b, Cedar.DefinedName a b (1 base, 1 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] fun a => ∃ b, Cedar.WfCedarType a b (5 base, 3 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] fun a => ∃ b, Cedar.WfRecordType a b (3 base, 0 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [checker] fun a b => Cedar.WfRecordType a b (3 base, 0 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] fun a => ∃ b c, Cedar.BindAttrType a b c (1 base, 1 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] fun c => ∃ a b, Cedar.LookupEntityAttr a b c (1 base, 1 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] fun c => ∃ a b, Cedar.GetEntityAttr a b c (1 base, 1 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] fun a => ∃ b, Cedar.DefinedEntity a b (1 base, 1 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] fun a => ∃ b c, Cedar.HasTypePrim a b c (5 base, 0 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [checker] fun a b => Cedar.ReqContextToCedarType a b (1 base, 1 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] fun a c => ∃ b, Cedar.HasTypeVar a b c (4 base, 0 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [checker] fun a b => Cedar.SubType a b (3 base, 2 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] fun b => ∃ a, Cedar.SubType a b (3 base, 2 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [checker] fun a b c => Cedar.BindAttrType a b c (1 base, 1 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] fun a c => ∃ b, Cedar.BindAttrType a b c (1 base, 1 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] ∃ a b c, Cedar.LookupEntityAttr a b c (1 base, 1 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] ∃ a b c, Cedar.GetEntityAttr a b c (1 base, 1 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ● [generator] ∃ a b, Cedar.SubType a b (3 base, 2 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:6: ◆ mutual (2):
+    [generator] fun a b => ∃ c d, Cedar.HasType a b c d (6 base, 35 rec)
+    [generator] fun a b d => ∃ c, Cedar.HasType a b c d (6 base, 35 rec)
+info: SpecimenTest/CedarExample/CedarCheckerGenerators.lean:92:0: time: 6558ms
+✔ [136/138] Built SpecimenTest.CedarExample.CedarWellTypedTermGenerator (1.3s)
+✔ [137/138] Built SpecimenTest (877ms)
+Build completed successfully (138 jobs).

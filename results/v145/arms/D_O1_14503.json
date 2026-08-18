@@ -1,0 +1,67 @@
+{
+  "arm": "D_O1",
+  "budget": 5,
+  "discovered_o2": true,
+  "evaluated": 2,
+  "first_qualified": {
+    "build_rc": 0,
+    "candidate": "both",
+    "evaluation": 2,
+    "o2_equivalent": true,
+    "prep_rc": 0,
+    "protected_rc": 0,
+    "qualified": true,
+    "seconds": 64.784,
+    "target_rc": 0,
+    "truth_table": [
+      0,
+      0,
+      0,
+      1
+    ]
+  },
+  "order": [
+    "none",
+    "both",
+    "input",
+    "output",
+    "all"
+  ],
+  "records": [
+    {
+      "build_rc": 0,
+      "candidate": "none",
+      "evaluation": 1,
+      "o2_equivalent": false,
+      "prep_rc": 0,
+      "protected_rc": 999,
+      "qualified": false,
+      "seconds": 23.056,
+      "target_rc": 1,
+      "truth_table": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "build_rc": 0,
+      "candidate": "both",
+      "evaluation": 2,
+      "o2_equivalent": true,
+      "prep_rc": 0,
+      "protected_rc": 0,
+      "qualified": true,
+      "seconds": 64.784,
+      "target_rc": 0,
+      "truth_table": [
+        0,
+        0,
+        0,
+        1
+      ]
+    }
+  ],
+  "seed": 14503
+}
