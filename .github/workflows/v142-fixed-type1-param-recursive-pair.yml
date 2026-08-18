@@ -1,0 +1,86 @@
+name: V142 fixed Type1-param recursive pair
+on:
+  push:
+    branches: ["v142-fixed-type1-param-recursive-pair"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  separator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with:
+          lint: "false"
+          test: "false"
+      - name: Apply K2 only
+        run: |
+          python scripts/v120_apply_binder_aware_fixed_parameter.py
+          lake build Specimen SpecimenTest
+      - name: K2 fixed Type1 parameter
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V142FixedType1Param.lean > param_k2.log 2>&1
+          PK2=$?
+          set -e
+          echo "$PK2" > param_k2.rc
+          cat param_k2.log
+      - name: Add K5
+        run: |
+          python scripts/v132_apply_output_dependent_input_determined.py
+          lake build Specimen SpecimenTest
+      - name: K2 plus K5 controls
+        shell: bash
+        run: |
+          set +e
+          lake env lean SpecimenTest/V142MonoControl.lean > mono.log 2>&1
+          MONO=$?
+          lake env lean SpecimenTest/V142FixedType1Param.lean > param_k2k5.log 2>&1
+          PK25=$?
+          set -e
+          PK2=$(cat param_k2.rc)
+          cat mono.log
+          cat param_k2k5.log
+          printf '{"k2_param":%s,"k2_k5_mono":%s,"k2_k5_param":%s}\n' "$PK2" "$MONO" "$PK25" > v142_result.json
+          if [ "$MONO" -ne 0 ]; then
+            echo 'R10_V142_MONO_CONTROL_FAILED' | tee v142_verdict.txt
+          elif [ "$PK2" -eq 0 ]; then
+            echo 'NULL_V142_TYPE1_PARAM_ALREADY_SUPPORTED_BY_K2' | tee v142_verdict.txt
+          elif [ "$PK25" -eq 0 ]; then
+            echo 'PASS_V142_K5_UNLOCKS_FIXED_TYPE1_PARAM_RECURSIVE_PAIR' | tee v142_verdict.txt
+          elif grep -qE 'Type 1|V142Params|ArbitrarySizedSuchThat.*V142Expr|failed to synthesize instance' param_k2k5.log; then
+            echo 'QUALIFIED_V142_FIXED_TYPE1_PARAM_FRONTIER' | tee v142_verdict.txt
+          else
+            echo 'R10_V142_UNRELATED_PARAM_FAILURE' | tee v142_verdict.txt
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v142-fixed-type1-param-recursive-pair
+          path: |
+            mono.log
+            param_k2.log
+            param_k2k5.log
+            v142_result.json
+            v142_verdict.txt
+      - name: Persist result to branch
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p /tmp/v142persist
+          cp mono.log param_k2.log param_k2k5.log v142_result.json v142_verdict.txt /tmp/v142persist/ 2>/dev/null || true
+          git reset --hard "$GITHUB_SHA"
+          mkdir -p results/v142
+          cp /tmp/v142persist/* results/v142/ 2>/dev/null || true
+          printf '%s\n' "$GITHUB_SHA" > results/v142/source_head.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add results/v142
+          if ! git diff --cached --quiet; then
+            git commit -m 'V142 separator result [skip ci]'
+            git push origin HEAD:v142-fixed-type1-param-recursive-pair
+          fi
