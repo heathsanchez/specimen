@@ -1,3 +1,4 @@
+# Execution-trigger-only change: no protocol, fixture, mechanism, arm, gate, or classification semantics changed.
 name: V177 K6 to K7S dependency
 on:
   push:
