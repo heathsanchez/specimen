@@ -2,6 +2,8 @@ name: V134 fixed specialization instance discriminator
 
 on:
   push:
+    branches: ["v120-binder-aware-fixed-parameter", "v134-repro-and-strict-depth"]
+  pull_request:
     branches: ["v120-binder-aware-fixed-parameter"]
   workflow_dispatch:
 
@@ -46,33 +48,32 @@ jobs:
           echo "GENERIC=$GENERIC FIXED=$FIXED"
           cat v134_generic.log
           cat v134_fixed.log
-          python - <<'PY'
-          import json,re
+          GENERIC="$GENERIC" FIXED="$FIXED" python - <<'PY'
+          import json, os, re
           from pathlib import Path
           g=Path('v134_generic.log').read_text()
           f=Path('v134_fixed.log').read_text()
+          generic_rc=int(os.environ['GENERIC'])
+          fixed_rc=int(os.environ['FIXED'])
           generic_param = ('Arbitrary' in g and ('Meta' in g or 'V134P' in g)) or ('failed to synthesize' in g)
-          fixed_symbolic = ('Arbitrary' in f and re.search(r'(a_|unk_|\.Meta)', f) is not None)
+          fixed_symbolic = ('Arbitrary' in f and re.search(r'(a_|unk_|\.Meta)', f) is not None) or ('failed to synthesize' in f and 'Arbitrary' in f)
           fixed_unrelated = ('Type mismatch' in f and 'sort `Type 1`' in f) or ('unknown module' in f) or ('unexpected token' in f)
           result={
-            'generic_rc': int(Path('/tmp/never').exists()) if False else None,
+            'generic_rc': generic_rc,
+            'fixed_rc': fixed_rc,
             'generic_parameter_dependent_signal': generic_param,
             'fixed_symbolic_instance_signal': fixed_symbolic,
             'fixed_unrelated_failure': fixed_unrelated,
           }
-          Path('v134_result.json').write_text(json.dumps(result,indent=2))
+          Path('v134_result.json').write_text(json.dumps(result,indent=2,sort_keys=True)+"\n")
           print(result)
-          if fixed_symbolic and not fixed_unrelated and generic_param:
-              print('PASS_V134_SPECIALIZATION_INSTANCE_DISCRIMINATOR')
-              raise SystemExit(0)
-          if 'FIXED=0' in '' :
-              pass
           PY
           if [ "$FIXED" -eq 0 ]; then
             echo "NULL_SPECIALIZATION_PROPAGATES_IN_MINIMAL_CASE"
             exit 121
           fi
-          if grep -Eq 'Arbitrary .*(a_|unk_|\.Meta)|failed to synthesize.*Arbitrary' v134_fixed.log; then
+          if grep -Eq 'Arbitrary .*(a_|unk_|\.Meta)|failed to synthesize.*Arbitrary' v134_fixed.log && \
+             ! grep -Eq 'unknown module|unexpected token|sort `Type 1`' v134_fixed.log; then
             echo "PASS_V134_SPECIALIZATION_INSTANCE_DISCRIMINATOR"
             exit 0
           fi
