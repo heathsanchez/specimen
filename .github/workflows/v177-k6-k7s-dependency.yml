@@ -1,0 +1,177 @@
+name: V177 K6 to K7S dependency
+on:
+  push:
+    branches: ["v177-k6-k7s-dependency"]
+    paths: ['.github/workflows/v177-k6-k7s-dependency.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  discriminate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leanprover/lean-action@v1
+        with: {build: default, test: false, lint: false}
+
+      - name: Freeze protocol fixtures and mechanism identity
+        run: |
+          set -euo pipefail
+          sha256sum \
+            protocols/V177_K6_K7S_DEPENDENCY.md \
+            fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean \
+            fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean \
+            fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean \
+            scripts/v120_apply_binder_aware_fixed_parameter.py \
+            scripts/v132_apply_output_dependent_input_determined.py \
+            scripts/v156_apply_requirement_provenance_promotion.py \
+            scripts/v156b_apply_checker_consumer_compat.py \
+            scripts/v158_apply_scope_dependent_promotion.py \
+            scripts/v168_apply_certified_constructor_irrefutability.py \
+            | tee v177_hashes.txt
+          test "$(sha256sum scripts/v168_apply_certified_constructor_irrefutability.py | awk '{print $1}')" = "5dd4755a3c42fa347d72f4694a3131ec97622a9405c12a0050eee57023dce3a1"
+          test "$(sha256sum fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean | awk '{print $1}')" = "a734ecb0aacc16cf870ec0d5390e73adfd092f8e80302a80c4beaea1b972b898"
+          test "$(sha256sum fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean | awk '{print $1}')" = "a20b5454002bb1049c53e0770397db242015e5e6503c016dd82551c0400fc041"
+          test "$(sha256sum fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean | awk '{print $1}')" = "9e453ac8f403ff80bc967412235be09044fdd6c54b3d09c88829c09b2f664a22"
+
+      - name: Define frozen arm helpers
+        run: |
+          cat > /tmp/v177_helpers.sh <<'SH'
+          set -euo pipefail
+          clean() { git checkout HEAD -- Specimen SpecimenTest; rm -rf .lake/build; }
+          k2k5() {
+            python scripts/v120_apply_binder_aware_fixed_parameter.py
+            python scripts/v132_apply_output_dependent_input_determined.py
+          }
+          k6() {
+            python scripts/v156_apply_requirement_provenance_promotion.py
+            python scripts/v156b_apply_checker_consumer_compat.py
+            python scripts/v158_apply_scope_dependent_promotion.py
+          }
+          k7s() { python scripts/v168_apply_certified_constructor_irrefutability.py; }
+          corebuild() { lake build Plausible Specimen; }
+          probe() {
+            local fixture="$1" prefix="$2"
+            set +e
+            lake env lean "$fixture" > "$prefix.log" 2>&1
+            local r=$?
+            set -e
+            echo "$r" > "$prefix.rc"
+          }
+          SH
+
+      - name: Arm A K2 K5 only
+        run: |
+          source /tmp/v177_helpers.sh
+          clean
+          k2k5 | tee v177_A_apply.log
+          corebuild > v177_A_build.log 2>&1
+          probe fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean v177_A_natural
+          probe fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean v177_A_heldout
+          probe fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean v177_A_safety
+
+      - name: Arm B K2 K5 plus K7S but no K6
+        run: |
+          source /tmp/v177_helpers.sh
+          clean
+          k2k5 | tee v177_B_prior.log
+          cp Specimen/MExp.lean /tmp/v177_B_pre_k7s.lean
+          k7s | tee v177_B_k7s.log
+          grep -q K7S_CERTIFIED_CONSTRUCTOR_IRREFUTABILITY_APPLIED v177_B_k7s.log
+          diff -u /tmp/v177_B_pre_k7s.lean Specimen/MExp.lean > v177_B_k7s.diff || true
+          test -s v177_B_k7s.diff
+          set +e
+          lake build > v177_B_fullbuild.log 2>&1; echo $? > v177_B_fullbuild.rc
+          lake test > v177_B_test.log 2>&1; echo $? > v177_B_test.rc
+          set -e
+          lake build Plausible Specimen > v177_B_requalify.log 2>&1
+          probe fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean v177_B_natural
+          probe fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean v177_B_heldout
+          probe fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean v177_B_safety
+
+      - name: Arm C K2 K5 plus K6 but no K7S
+        run: |
+          source /tmp/v177_helpers.sh
+          clean
+          k2k5 | tee v177_C_k2k5.log
+          k6 | tee v177_C_k6.log
+          corebuild > v177_C_build.log 2>&1
+          probe fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean v177_C_natural
+          probe fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean v177_C_heldout
+          probe fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean v177_C_safety
+
+      - name: Arm D K2 K5 plus K6 plus K7S
+        run: |
+          source /tmp/v177_helpers.sh
+          clean
+          k2k5 | tee v177_D_k2k5.log
+          k6 | tee v177_D_k6.log
+          cp Specimen/MExp.lean /tmp/v177_D_pre_k7s.lean
+          k7s | tee v177_D_k7s.log
+          grep -q K7S_CERTIFIED_CONSTRUCTOR_IRREFUTABILITY_APPLIED v177_D_k7s.log
+          diff -u /tmp/v177_D_pre_k7s.lean Specimen/MExp.lean > v177_D_k7s.diff || true
+          test -s v177_D_k7s.diff
+          set +e
+          lake build > v177_D_fullbuild.log 2>&1; echo $? > v177_D_fullbuild.rc
+          lake test > v177_D_test.log 2>&1; echo $? > v177_D_test.rc
+          set -e
+          lake build Plausible Specimen > v177_D_requalify.log 2>&1
+          probe fixtures/V165_UPSTREAM_ISSUE12_REPRO.lean v177_D_natural
+          probe fixtures/V166_HELDOUT_SINGLE_CTOR_INDUCTIVE.lean v177_D_heldout
+          probe fixtures/V166_MULTICTOR_WILDCARD_SAFETY.lean v177_D_safety
+
+      - name: Frozen V177 classification
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          def fixture(prefix):
+              rp=pathlib.Path(prefix+'.rc'); lp=pathlib.Path(prefix+'.log')
+              rc=int(rp.read_text().strip()) if rp.exists() else None
+              log=lp.read_text(errors='replace') if lp.exists() else ''
+              lo=log.lower()
+              return {'rc':rc,'redundant':('redundantmatchalt' in lo or 'redundant alternative' in lo),'tail':log[-1800:]}
+          def rcfile(path):
+              p=pathlib.Path(path); return int(p.read_text().strip()) if p.exists() else None
+          arms={}
+          for a in 'ABCD':
+              arms[a]={k:fixture(f'v177_{a}_{k}') for k in ['natural','heldout','safety']}
+          Bbuild=rcfile('v177_B_fullbuild.rc'); Btest=rcfile('v177_B_test.rc')
+          Dbuild=rcfile('v177_D_fullbuild.rc'); Dtest=rcfile('v177_D_test.rc')
+          apparatus=not pathlib.Path('v177_hashes.txt').exists() or any(arms[a][k]['rc'] is None for a in 'ABCD' for k in ['natural','heldout','safety'])
+          base_fail=lambda a: arms[a]['natural']['rc']!=0 and arms[a]['natural']['redundant'] and arms[a]['heldout']['rc']!=0 and arms[a]['heldout']['redundant'] and arms[a]['safety']['rc']==0
+          pass3=lambda a: all(arms[a][k]['rc']==0 for k in ['natural','heldout','safety'])
+          protectedB=(Bbuild==0 and Btest==0)
+          protectedD=(Dbuild==0 and Dtest==0)
+          Bk7=pathlib.Path('v177_B_k7s.log').exists() and 'K7S_CERTIFIED_CONSTRUCTOR_IRREFUTABILITY_APPLIED' in pathlib.Path('v177_B_k7s.log').read_text(errors='replace')
+          Dk7=pathlib.Path('v177_D_k7s.log').exists() and 'K7S_CERTIFIED_CONSTRUCTOR_IRREFUTABILITY_APPLIED' in pathlib.Path('v177_D_k7s.log').read_text(errors='replace')
+          gates={'A_baseline_fail':base_fail('A'),'C_k6_only_fail':base_fail('C'),'D_full_pass':pass3('D'),'D_protected':protectedD,'B_k7s_applied':Bk7,'D_k7s_applied':Dk7}
+          if apparatus:
+              verdict='R10_V177_INCONCLUSIVE'
+          elif not all(gates.values()):
+              verdict='INCONCLUSIVE_V177_FROZEN_PREREQUISITES_NOT_MET'
+          elif pass3('B') and protectedB:
+              verdict='NEGATIVE_V177_K6_NOT_REQUIRED_FOR_K7S_EFFECT'
+          elif base_fail('B') and protectedB:
+              verdict='PASS_V177_K6_REQUIRED_FOR_K7S_EFFECT'
+          else:
+              verdict='INCONCLUSIVE_V177_MIXED_K6_ABLATION_PATTERN'
+          out={'canonical_id':'V177_K6_K7S_DEPENDENCY','apparatus':apparatus,'arms':arms,'protected':{'B':{'build':Bbuild,'test':Btest},'D':{'build':Dbuild,'test':Dtest}},'gates':gates,'verdict':verdict,'claim_boundary':'Execution-level K6 dependency of K7S effect only; does not establish raw host-language constructibility.'}
+          pathlib.Path('v177_result.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(out,indent=2,sort_keys=True))
+          if verdict.startswith('R10_') or verdict.startswith('INCONCLUSIVE_'):
+              raise SystemExit(1)
+          PY
+
+      - name: Diagnostics
+        if: always()
+        run: |
+          cat v177_result.json || true
+          for f in v177_*_natural.log v177_*_heldout.log v177_*_safety.log; do echo ==== $f ====; tail -70 "$f" 2>/dev/null || true; done
+          tail -100 v177_B_test.log 2>/dev/null || true
+          tail -100 v177_D_test.log 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: v177-k6-k7s-dependency, path: 'v177*', retention-days: 90}
